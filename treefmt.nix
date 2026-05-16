@@ -10,6 +10,7 @@
     shellcheck.enable = true;
     gofmt.enable = true;
     ruff.enable = true;
+    rustfmt.enable = true;
     yamlfmt.enable = true;
     toml-sort.enable = true;
     dos2unix.enable = true;
