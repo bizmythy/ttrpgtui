@@ -26,8 +26,7 @@ pub(crate) fn render_header(frame: &mut Frame, area: Rect) {
 }
 
 pub(crate) fn render_footer(frame: &mut Frame, area: Rect) {
-    let help =
-        "j/k move • Space select • +/- health • n new • r rename • u undo • Ctrl+R redo • q quit";
+    let help = "j/k move • Space select • +/- health • i initiative • n new • r rename • u undo • Ctrl+R redo • q quit";
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
         area,
@@ -100,7 +99,10 @@ fn render_creature_row(
         columns[0],
         Line::from(vec![
             Span::styled(selected_marker, border_style),
-            Span::styled(creature.name.clone(), text_style),
+            Span::styled(
+                creature.name.clone(),
+                text_style.add_modifier(Modifier::BOLD),
+            ),
         ]),
     );
     render_cell(
@@ -150,7 +152,7 @@ fn render_cell(frame: &mut Frame, area: Rect, line: Line<'static>) {
 fn row_border_style(is_hovered: bool, is_selected: bool) -> Style {
     match (is_hovered, is_selected) {
         (true, true) => Style::default()
-            .fg(Color::LightGreen)
+            .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
         (false, true) => Style::default().fg(Color::Green),
         (true, false) => Style::default().fg(Color::Cyan),

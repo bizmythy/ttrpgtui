@@ -30,6 +30,21 @@ pub(crate) fn render_popup(app: &mut App, frame: &mut Frame, full_area: Rect, li
                 input.error.as_deref(),
             );
         }
+        AppMode::InitiativeInput(input) => {
+            let target_label = target_label(&app.creatures, &input.target_ids);
+            input
+                .textarea
+                .set_block(input_block(format!("Set initiative for {target_label}")));
+
+            let area = row_popup_area(full_area, list_area, app.hovered, app.scroll_offset);
+            render_textarea_popup(
+                frame,
+                full_area,
+                area,
+                &input.textarea,
+                input.error.as_deref(),
+            );
+        }
         AppMode::RenameInput(input) => {
             let title = app.creatures.get(input.target_id).map_or_else(
                 || "Rename creature".to_string(),

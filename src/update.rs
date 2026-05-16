@@ -9,6 +9,7 @@ pub fn update(app: &mut App, key_event: KeyEvent) {
     match app.mode {
         AppMode::Normal => update_normal(app, key_event),
         AppMode::HealthInput(_) => update_health_input(app, key_event),
+        AppMode::InitiativeInput(_) => update_initiative_input(app, key_event),
         AppMode::RenameInput(_) => update_rename_input(app, key_event),
         AppMode::NewCreature(_) => update_new_creature(app, key_event),
     }
@@ -16,7 +17,8 @@ pub fn update(app: &mut App, key_event: KeyEvent) {
 
 fn update_normal(app: &mut App, key_event: KeyEvent) {
     match key_event.code {
-        KeyCode::Esc | KeyCode::Char('q') => app.quit(),
+        KeyCode::Esc => app.clear_selection(),
+        KeyCode::Char('q') => app.quit(),
         KeyCode::Char('c') | KeyCode::Char('C') if key_event.modifiers == KeyModifiers::CONTROL => {
             app.quit()
         }
@@ -28,6 +30,7 @@ fn update_normal(app: &mut App, key_event: KeyEvent) {
         KeyCode::Char(' ') => app.toggle_hovered_selection(),
         KeyCode::Char('=') | KeyCode::Char('+') => app.open_health_input(HealthOperation::Add),
         KeyCode::Char('-') | KeyCode::Char('_') => app.open_health_input(HealthOperation::Subtract),
+        KeyCode::Char('i') => app.open_initiative_input(),
         KeyCode::Char('n') => app.open_new_creature_form(),
         KeyCode::Char('u') => app.undo(),
         KeyCode::Char('r') | KeyCode::Char('R')
@@ -44,6 +47,14 @@ fn update_health_input(app: &mut App, key_event: KeyEvent) {
     match key_event.code {
         KeyCode::Esc => app.cancel_input(),
         KeyCode::Enter => app.submit_health_input(),
+        _ => app.route_textarea_key(key_event),
+    }
+}
+
+fn update_initiative_input(app: &mut App, key_event: KeyEvent) {
+    match key_event.code {
+        KeyCode::Esc => app.cancel_input(),
+        KeyCode::Enter => app.submit_initiative_input(),
         _ => app.route_textarea_key(key_event),
     }
 }
@@ -139,5 +150,49 @@ mod tests {
         update(&mut app, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
         assert_eq!(app.hovered, hovered);
+    }
+
+    #[test]
+    fn escape_clears_selection_without_quitting() {
+        let mut app = App::new();
+        app.toggle_hovered_selection();
+
+        update(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.selected.is_empty());
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn movement_wraps_between_first_and_last_rows() {
+        let mut app = App::new();
+        app.move_last();
+
+        update(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.hovered, Some(0));
+
+        update(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.hovered, app.creatures.len().checked_sub(1));
+    }
+
+    #[test]
+    fn i_updates_initiative_and_keeps_target_hovered_after_resort() {
+        let mut app = App::new();
+        app.move_last();
+        let id = app.hovered_id().unwrap();
+
+        update(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+        );
+        if let AppMode::InitiativeInput(input) = &mut app.mode {
+            input.textarea.insert_str("99");
+        } else {
+            panic!("expected initiative input mode");
+        }
+        update(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.creatures.get(id).unwrap().initiative, Some(99));
+        assert_eq!(app.hovered_id(), Some(id));
     }
 }

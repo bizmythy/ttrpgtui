@@ -23,7 +23,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::{Terminal, backend::TestBackend, style::Color};
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        style::{Color, Modifier},
+    };
 
     use super::render;
     use crate::app::App;
@@ -55,5 +59,36 @@ mod tests {
         let john_x = 3;
         let content_y = 2;
         assert_eq!(buffer[(john_x, content_y)].fg, Color::Red);
+    }
+
+    #[test]
+    fn creature_names_render_bold() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let first_name_x = 3;
+        let first_name_y = 2;
+        assert!(
+            buffer[(first_name_x, first_name_y)]
+                .modifier
+                .contains(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn hovered_selected_row_uses_cyan_border() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.toggle_hovered_selection();
+
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(0, 1)].fg, Color::Cyan);
     }
 }

@@ -7,12 +7,19 @@ use crate::creature::CreatureId;
 pub enum AppMode {
     Normal,
     HealthInput(Box<HealthInput>),
+    InitiativeInput(Box<InitiativeInput>),
     RenameInput(Box<RenameInput>),
     NewCreature(Box<NewCreatureForm>),
 }
 
 pub struct HealthInput {
     pub operation: HealthOperation,
+    pub target_ids: Vec<CreatureId>,
+    pub textarea: TextArea<'static>,
+    pub error: Option<String>,
+}
+
+pub struct InitiativeInput {
     pub target_ids: Vec<CreatureId>,
     pub textarea: TextArea<'static>,
     pub error: Option<String>,
@@ -67,6 +74,16 @@ impl HealthInput {
             operation,
             target_ids,
             textarea: single_line_textarea("amount", ""),
+            error: None,
+        }
+    }
+}
+
+impl InitiativeInput {
+    pub fn new(target_ids: Vec<CreatureId>) -> Self {
+        Self {
+            target_ids,
+            textarea: single_line_textarea("initiative", "Initiative"),
             error: None,
         }
     }
@@ -171,11 +188,15 @@ pub fn textarea_value(textarea: &TextArea<'_>) -> String {
     textarea.lines().join("\n")
 }
 
-pub fn parse_positive_i32(value: String, label: &str) -> Result<i32, String> {
-    let value = value.trim();
-    let parsed = value
+pub fn parse_i32(value: String, label: &str) -> Result<i32, String> {
+    value
+        .trim()
         .parse::<i32>()
-        .map_err(|_| format!("{label} must be a positive number"))?;
+        .map_err(|_| format!("{label} must be a number"))
+}
+
+pub fn parse_positive_i32(value: String, label: &str) -> Result<i32, String> {
+    let parsed = parse_i32(value, label)?;
     if parsed <= 0 {
         return Err(format!("{label} must be positive"));
     }

@@ -4,10 +4,10 @@ use ratatui::crossterm::event::KeyEvent;
 use undo::Record;
 
 use crate::creature::{Creature, CreatureId, Creatures};
-use crate::edit::{CreatureEdit, HealthChange};
+use crate::edit::{CreatureEdit, HealthChange, InitiativeChange};
 use crate::input::{
-    AppMode, HealthInput, HealthOperation, RenameInput, letter_suffix, parse_positive_i32,
-    textarea_value,
+    AppMode, HealthInput, HealthOperation, InitiativeInput, RenameInput, letter_suffix, parse_i32,
+    parse_positive_i32, textarea_value,
 };
 
 /// Application.
@@ -65,10 +65,13 @@ impl App {
             self.hovered = None;
             return;
         }
-        self.hovered = Some(
-            self.hovered
-                .map_or(0, |index| (index + 1).min(self.creatures.len() - 1)),
-        );
+        self.hovered = Some(self.hovered.map_or(0, |index| {
+            if index + 1 >= self.creatures.len() {
+                0
+            } else {
+                index + 1
+            }
+        }));
     }
 
     pub fn move_previous(&mut self) {
@@ -76,7 +79,13 @@ impl App {
             self.hovered = None;
             return;
         }
-        self.hovered = Some(self.hovered.map_or(0, |index| index.saturating_sub(1)));
+        self.hovered = Some(self.hovered.map_or(0, |index| {
+            if index == 0 {
+                self.creatures.len() - 1
+            } else {
+                index - 1
+            }
+        }));
     }
 
     pub fn move_first(&mut self) {
@@ -116,6 +125,19 @@ impl App {
         }
 
         self.mode = AppMode::HealthInput(Box::new(HealthInput::new(operation, target_ids)));
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+    }
+
+    pub fn open_initiative_input(&mut self) {
+        let target_ids = self.target_ids();
+        if target_ids.is_empty() {
+            return;
+        }
+
+        self.mode = AppMode::InitiativeInput(Box::new(InitiativeInput::new(target_ids)));
     }
 
     pub fn open_rename_input(&mut self) {
@@ -177,9 +199,51 @@ impl App {
         self.mode = AppMode::Normal;
     }
 
+    pub fn submit_initiative_input(&mut self) {
+        let AppMode::InitiativeInput(input) = &self.mode else {
+            return;
+        };
+
+        let initiative = match parse_i32(textarea_value(&input.textarea), "initiative") {
+            Ok(initiative) => initiative,
+            Err(error) => {
+                if let AppMode::InitiativeInput(input) = &mut self.mode {
+                    input.error = Some(error);
+                }
+                return;
+            }
+        };
+        let target_ids = input.target_ids.clone();
+        let first_target = target_ids.first().copied();
+        let mut changes = Vec::new();
+
+        for id in target_ids {
+            if let Some(creature) = self.creatures.get(id) {
+                let before = creature.initiative;
+                let after = Some(initiative);
+                if before != after {
+                    changes.push(InitiativeChange::new(id, before, after));
+                }
+            }
+        }
+
+        if !changes.is_empty() {
+            self.history
+                .edit(&mut self.creatures, CreatureEdit::SetInitiative { changes });
+            if let Some(first_target) = first_target {
+                self.hovered = self.creatures.index_of(first_target);
+            }
+            self.reconcile_selection_and_hover();
+        }
+        self.mode = AppMode::Normal;
+    }
+
     pub fn route_textarea_key(&mut self, key_event: KeyEvent) {
         match &mut self.mode {
             AppMode::HealthInput(input) => {
+                input.textarea.input(key_event);
+            }
+            AppMode::InitiativeInput(input) => {
                 input.textarea.input(key_event);
             }
             AppMode::RenameInput(input) => {

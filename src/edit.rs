@@ -16,9 +16,25 @@ impl HealthChange {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InitiativeChange {
+    id: CreatureId,
+    before: Option<i32>,
+    after: Option<i32>,
+}
+
+impl InitiativeChange {
+    pub fn new(id: CreatureId, before: Option<i32>, after: Option<i32>) -> Self {
+        Self { id, before, after }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreatureEdit {
     AdjustHealth {
         changes: Vec<HealthChange>,
+    },
+    SetInitiative {
+        changes: Vec<InitiativeChange>,
     },
     RenameCreature {
         id: CreatureId,
@@ -44,6 +60,14 @@ impl Edit for CreatureEdit {
                 }
                 target.sort();
             }
+            Self::SetInitiative { changes } => {
+                for change in changes {
+                    if let Some(creature) = target.get_mut(change.id) {
+                        creature.set_initiative(change.after);
+                    }
+                }
+                target.sort();
+            }
             Self::RenameCreature { id, after, .. } => {
                 if let Some(creature) = target.get_mut(*id) {
                     creature.name.clone_from(after);
@@ -64,6 +88,14 @@ impl Edit for CreatureEdit {
                 for change in changes {
                     if let Some(creature) = target.get_mut(change.id) {
                         creature.set_health(change.before);
+                    }
+                }
+                target.sort();
+            }
+            Self::SetInitiative { changes } => {
+                for change in changes {
+                    if let Some(creature) = target.get_mut(change.id) {
+                        creature.set_initiative(change.before);
                     }
                 }
                 target.sort();

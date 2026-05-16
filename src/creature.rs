@@ -75,6 +75,10 @@ impl Creature {
         self.health = health;
     }
 
+    pub fn set_initiative(&mut self, initiative: Option<i32>) {
+        self.initiative = initiative;
+    }
+
     pub fn modify_health(&mut self, delta: i32) -> i32 {
         self.health += delta;
 
