@@ -8,8 +8,13 @@ pub fn update(app: &mut App, key_event: KeyEvent) {
         KeyCode::Char('c') | KeyCode::Char('C') if key_event.modifiers == KeyModifiers::CONTROL => {
             app.quit()
         }
-        // KeyCode::Right | KeyCode::Char('j') => app.increment_counter(),
-        // KeyCode::Left | KeyCode::Char('k') => app.decrement_counter(),
+
+        KeyCode::Char('j') | KeyCode::Down => app.creature_table_state.select_next(),
+        KeyCode::Char('k') | KeyCode::Up => app.creature_table_state.select_previous(),
+        KeyCode::Char('l') | KeyCode::Right => app.creature_table_state.select_next_column(),
+        KeyCode::Char('h') | KeyCode::Left => app.creature_table_state.select_previous_column(),
+        KeyCode::Char('g') => app.creature_table_state.select_first(),
+        KeyCode::Char('G') => app.creature_table_state.select_last(),
         _ => {}
     };
 }
