@@ -1,6 +1,6 @@
 use ratatui::widgets::TableState;
 
-use crate::creature::Creatures;
+use crate::creature::{Creature, Creatures};
 
 /// Application.
 #[derive(Debug, Default)]
@@ -10,7 +10,7 @@ pub struct App {
     /// Creature states
     pub creatures: Creatures,
     /// Creature table state
-    pub creature_table_state: TableState
+    pub creature_table_state: TableState,
 }
 
 impl App {
@@ -19,6 +19,12 @@ impl App {
         let mut app = Self::default();
         app.creature_table_state.select_first();
         app.creature_table_state.select_first_column();
+
+        // TEMP: test data
+        app.creatures.add(Creature::new("john", 2, 12, 35));
+        app.creatures.add(Creature::new("jane", 1, 10, 25));
+        app.creatures.add(Creature::new("horace", 3, 15, 40));
+
         app
     }
 

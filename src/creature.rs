@@ -11,12 +11,12 @@ pub struct Creature {
 }
 
 impl Creature {
-    pub fn new(name: String, initiative: u8, ac: u8, max_health: u16) -> Self {
+    pub fn new(name: impl Into<String>, initiative: u8, ac: u8, max_health: u16) -> Self {
         Self {
-            name,
+            name: name.into(),
             initiative,
             ac,
-            health: (max_health as i32),
+            health: max_health as i32,
             max_health,
         }
     }
@@ -76,9 +76,9 @@ mod tests {
     #[test]
     fn iter_returns_creatures_in_descending_initiative_order_without_consuming() {
         let mut creatures = Creatures::default();
-        creatures.add(Creature::new("slow".into(), 3, 12, 7));
-        creatures.add(Creature::new("fast".into(), 18, 15, 12));
-        creatures.add(Creature::new("middle".into(), 10, 13, 9));
+        creatures.add(Creature::new("slow", 3, 12, 7));
+        creatures.add(Creature::new("fast", 18, 15, 12));
+        creatures.add(Creature::new("middle", 10, 13, 9));
 
         let names: Vec<&str> = creatures
             .iter()
