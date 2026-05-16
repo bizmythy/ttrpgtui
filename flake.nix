@@ -35,6 +35,7 @@
             (aspellWithDicts (ps: with ps; [ en ]))
             # keep-sorted start
             cargo-flamegraph
+            cargo-generate
             fenix-toolchain
             nushell
             # keep-sorted end
