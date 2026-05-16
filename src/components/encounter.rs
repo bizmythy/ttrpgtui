@@ -14,11 +14,13 @@ use undo::Record;
 use super::Component;
 use crate::{
     action::Action,
-    creature::{Creature, CreatureId, Creatures},
-    edit::{CreatureEdit, HealthChange, InitiativeChange},
-    input::{
-        AppMode, HealthInput, HealthOperation, InitiativeInput, NewCreatureField, RenameInput,
-        letter_suffix, parse_i32, parse_positive_i32, textarea_value,
+    models::{
+        creature::{Creature, CreatureId, Creatures},
+        edit::{CreatureEdit, HealthChange, InitiativeChange},
+        input::{
+            AppMode, HealthInput, HealthOperation, InitiativeInput, NewCreatureField, RenameInput,
+            letter_suffix, parse_i32, parse_positive_i32, textarea_value,
+        },
     },
 };
 
@@ -825,7 +827,7 @@ fn row_popup_area(
     Rect::new(x, y, width, height).clamp(full_area)
 }
 
-fn style_new_creature_form(form: &mut crate::input::NewCreatureForm) {
+fn style_new_creature_form(form: &mut crate::models::input::NewCreatureForm) {
     set_field_block(
         &mut form.fields.name,
         "name",
@@ -885,7 +887,7 @@ mod tests {
     use super::{Component, Encounter};
     use crate::{
         action::Action,
-        input::{AppMode, HealthOperation, NewCreatureField, textarea_value},
+        models::input::{AppMode, HealthOperation, NewCreatureField, textarea_value},
     };
 
     fn apply(encounter: &mut Encounter, action: Action) {

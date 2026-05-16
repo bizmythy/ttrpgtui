@@ -1,6 +1,6 @@
 use undo::Edit;
 
-use crate::creature::{Creature, CreatureId, Creatures};
+use super::creature::{Creature, CreatureId, Creatures};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HealthChange {

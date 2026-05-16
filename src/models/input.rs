@@ -2,7 +2,7 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 use ratatui_textarea::TextArea;
 
-use crate::creature::CreatureId;
+use super::creature::CreatureId;
 
 pub enum AppMode {
     Normal,

@@ -8,11 +8,9 @@ mod app;
 mod cli;
 mod components;
 mod config;
-mod creature;
-mod edit;
 mod errors;
-mod input;
 mod logging;
+mod models;
 mod tui;
 
 #[tokio::main]
