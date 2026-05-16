@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
-use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use undo::Record;
 
 use crate::creature::{Creature, CreatureId, Creatures};
 use crate::edit::{CreatureEdit, HealthChange, InitiativeChange};
 use crate::input::{
-    AppMode, HealthInput, HealthOperation, InitiativeInput, RenameInput, letter_suffix, parse_i32,
-    parse_positive_i32, textarea_value,
+    AppMode, HealthInput, HealthOperation, InitiativeInput, NewCreatureField, RenameInput,
+    letter_suffix, parse_i32, parse_positive_i32, textarea_value,
 };
 
 /// Application.
@@ -241,15 +241,24 @@ impl App {
     pub fn route_textarea_key(&mut self, key_event: KeyEvent) {
         match &mut self.mode {
             AppMode::HealthInput(input) => {
-                input.textarea.input(key_event);
+                if numeric_textarea_key_allowed(key_event) {
+                    input.textarea.input(key_event);
+                }
             }
             AppMode::InitiativeInput(input) => {
-                input.textarea.input(key_event);
+                if numeric_textarea_key_allowed(key_event) {
+                    input.textarea.input(key_event);
+                }
             }
             AppMode::RenameInput(input) => {
                 input.textarea.input(key_event);
             }
             AppMode::NewCreature(form) => {
+                if !matches!(form.active_field, NewCreatureField::Name)
+                    && !numeric_textarea_key_allowed(key_event)
+                {
+                    return;
+                }
                 form.active_textarea_mut().input(key_event);
             }
             AppMode::Normal => {}
@@ -405,10 +414,24 @@ impl Default for App {
     }
 }
 
+fn numeric_textarea_key_allowed(key_event: KeyEvent) -> bool {
+    match key_event.code {
+        KeyCode::Char(character) => {
+            character.is_ascii_digit()
+                && !key_event
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        }
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
     use super::App;
-    use crate::input::{AppMode, HealthOperation};
+    use crate::input::{AppMode, HealthOperation, NewCreatureField, textarea_value};
 
     #[test]
     fn target_ids_use_selection_when_present() {
@@ -470,5 +493,62 @@ mod tests {
         assert!(app.creatures.get(id).unwrap().get_health() < 0);
         app.redo();
         assert_eq!(app.creatures.get(id).unwrap().get_health(), max);
+    }
+
+    #[test]
+    fn numeric_input_ignores_letters_and_punctuation() {
+        let mut app = App::new();
+
+        app.open_health_input(HealthOperation::Add);
+        for character in ['1', 'a', '-', '.', '2'] {
+            app.route_textarea_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+        }
+
+        let AppMode::HealthInput(input) = &app.mode else {
+            panic!("expected health input mode");
+        };
+        assert_eq!(textarea_value(&input.textarea), "12");
+    }
+
+    #[test]
+    fn numeric_input_still_allows_editing_keys() {
+        let mut app = App::new();
+
+        app.open_initiative_input();
+        for character in ['1', '2'] {
+            app.route_textarea_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+        }
+        app.route_textarea_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        app.route_textarea_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
+
+        let AppMode::InitiativeInput(input) = &app.mode else {
+            panic!("expected initiative input mode");
+        };
+        assert_eq!(textarea_value(&input.textarea), "13");
+    }
+
+    #[test]
+    fn new_creature_numeric_fields_filter_input_but_name_does_not() {
+        let mut app = App::new();
+
+        app.open_new_creature_form();
+        if let AppMode::NewCreature(form) = &mut app.mode {
+            form.active_field = NewCreatureField::Name;
+        }
+        app.route_textarea_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        app.route_textarea_key(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE));
+
+        if let AppMode::NewCreature(form) = &mut app.mode {
+            form.active_field = NewCreatureField::Health;
+        }
+        app.route_textarea_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        app.route_textarea_key(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE));
+        app.route_textarea_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
+
+        let AppMode::NewCreature(form) = &app.mode else {
+            panic!("expected new creature mode");
+        };
+        assert_eq!(textarea_value(&form.fields.name), "a-");
+        assert_eq!(textarea_value(&form.fields.health), "4");
     }
 }
