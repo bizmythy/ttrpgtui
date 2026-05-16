@@ -4,6 +4,12 @@ pub mod app;
 // Creature data.
 pub mod creature;
 
+/// Undoable creature edits.
+pub mod edit;
+
+/// Input modes and form state.
+pub mod input;
+
 /// Terminal events handler.
 pub mod event;
 

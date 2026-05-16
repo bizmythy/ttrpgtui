@@ -1,6 +1,9 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, AppMode, HealthOperation};
+use crate::{
+    app::App,
+    input::{AppMode, HealthOperation},
+};
 
 pub fn update(app: &mut App, key_event: KeyEvent) {
     match app.mode {
@@ -68,7 +71,10 @@ mod tests {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::update;
-    use crate::app::{App, AppMode, HealthOperation};
+    use crate::{
+        app::App,
+        input::{AppMode, HealthOperation},
+    };
 
     #[test]
     fn space_toggles_hovered_selection() {
