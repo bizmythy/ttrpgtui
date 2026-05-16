@@ -39,7 +39,8 @@ fn render_header(frame: &mut Frame, area: Rect) {
 }
 
 fn render_footer(frame: &mut Frame, area: Rect) {
-    let help = "j/k move • Space select • +/- health • n new • u undo • Ctrl+R redo • q quit";
+    let help =
+        "j/k move • Space select • +/- health • n new • r rename • u undo • Ctrl+R redo • q quit";
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
         area,
@@ -175,6 +176,29 @@ fn render_popup(app: &mut App, frame: &mut Frame, full_area: Rect, list_area: Re
                 HealthOperation::Add => format!("Add HP to {target_label}"),
                 HealthOperation::Subtract => format!("Subtract HP from {target_label}"),
             };
+            input.textarea.set_block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::LightBlue))
+                    .title(title),
+            );
+
+            let area = health_popup_area(full_area, list_area, app.hovered, app.scroll_offset);
+            frame.render_widget(Clear, area);
+            frame.render_widget(&input.textarea, area);
+            if let Some(error) = &input.error {
+                let error_area = Rect::new(area.x, area.bottom(), area.width, 1).clamp(full_area);
+                frame.render_widget(
+                    Paragraph::new(error.clone()).style(Style::default().fg(Color::Red)),
+                    error_area,
+                );
+            }
+        }
+        AppMode::RenameInput(input) => {
+            let title = app.creatures.get(input.target_id).map_or_else(
+                || "Rename creature".to_string(),
+                |creature| format!("Rename {}", creature.name),
+            );
             input.textarea.set_block(
                 Block::default()
                     .borders(Borders::ALL)

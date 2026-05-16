@@ -6,6 +6,7 @@ pub fn update(app: &mut App, key_event: KeyEvent) {
     match app.mode {
         AppMode::Normal => update_normal(app, key_event),
         AppMode::HealthInput(_) => update_health_input(app, key_event),
+        AppMode::RenameInput(_) => update_rename_input(app, key_event),
         AppMode::NewCreature(_) => update_new_creature(app, key_event),
     }
 }
@@ -31,6 +32,7 @@ fn update_normal(app: &mut App, key_event: KeyEvent) {
         {
             app.redo()
         }
+        KeyCode::Char('r') => app.open_rename_input(),
         _ => {}
     };
 }
@@ -39,6 +41,14 @@ fn update_health_input(app: &mut App, key_event: KeyEvent) {
     match key_event.code {
         KeyCode::Esc => app.cancel_input(),
         KeyCode::Enter => app.submit_health_input(),
+        _ => app.route_textarea_key(key_event),
+    }
+}
+
+fn update_rename_input(app: &mut App, key_event: KeyEvent) {
+    match key_event.code {
+        KeyCode::Esc => app.cancel_input(),
+        KeyCode::Enter => app.submit_rename_input(),
         _ => app.route_textarea_key(key_event),
     }
 }
@@ -93,6 +103,25 @@ mod tests {
         };
         assert_eq!(input.operation, HealthOperation::Add);
         assert_eq!(input.target_ids, vec![id]);
+    }
+
+    #[test]
+    fn r_opens_rename_only_without_multiselect() {
+        let mut app = App::new();
+
+        update(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        );
+        assert!(matches!(app.mode, AppMode::RenameInput(_)));
+
+        app.cancel_input();
+        app.toggle_hovered_selection();
+        update(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        );
+        assert!(matches!(app.mode, AppMode::Normal));
     }
 
     #[test]

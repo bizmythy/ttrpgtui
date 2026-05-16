@@ -28,12 +28,19 @@ pub struct App {
 pub enum AppMode {
     Normal,
     HealthInput(Box<HealthInput>),
+    RenameInput(Box<RenameInput>),
     NewCreature(Box<NewCreatureForm>),
 }
 
 pub struct HealthInput {
     pub operation: HealthOperation,
     pub target_ids: Vec<CreatureId>,
+    pub textarea: TextArea<'static>,
+    pub error: Option<String>,
+}
+
+pub struct RenameInput {
+    pub target_id: CreatureId,
     pub textarea: TextArea<'static>,
     pub error: Option<String>,
 }
@@ -76,8 +83,17 @@ pub struct HealthChange {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreatureEdit {
-    AdjustHealth { changes: Vec<HealthChange> },
-    AddCreatures { creatures: Vec<Creature> },
+    AdjustHealth {
+        changes: Vec<HealthChange>,
+    },
+    RenameCreature {
+        id: CreatureId,
+        before: String,
+        after: String,
+    },
+    AddCreatures {
+        creatures: Vec<Creature>,
+    },
 }
 
 impl Edit for CreatureEdit {
@@ -91,6 +107,12 @@ impl Edit for CreatureEdit {
                     if let Some(creature) = target.get_mut(change.id) {
                         creature.set_health(change.after);
                     }
+                }
+                target.sort();
+            }
+            Self::RenameCreature { id, after, .. } => {
+                if let Some(creature) = target.get_mut(*id) {
+                    creature.name.clone_from(after);
                 }
                 target.sort();
             }
@@ -109,6 +131,12 @@ impl Edit for CreatureEdit {
                     if let Some(creature) = target.get_mut(change.id) {
                         creature.set_health(change.before);
                     }
+                }
+                target.sort();
+            }
+            Self::RenameCreature { id, before, .. } => {
+                if let Some(creature) = target.get_mut(*id) {
+                    creature.name.clone_from(before);
                 }
                 target.sort();
             }
@@ -216,6 +244,26 @@ impl App {
         }));
     }
 
+    pub fn open_rename_input(&mut self) {
+        if !self.selected.is_empty() {
+            return;
+        }
+        let Some(target_id) = self.hovered_id() else {
+            return;
+        };
+        let Some(creature) = self.creatures.get(target_id) else {
+            return;
+        };
+
+        let mut textarea = single_line_textarea("name", "Name");
+        textarea.insert_str(&creature.name);
+        self.mode = AppMode::RenameInput(Box::new(RenameInput {
+            target_id,
+            textarea,
+            error: None,
+        }));
+    }
+
     pub fn cancel_input(&mut self) {
         self.mode = AppMode::Normal;
     }
@@ -266,11 +314,50 @@ impl App {
             AppMode::HealthInput(input) => {
                 input.textarea.input(key_event);
             }
+            AppMode::RenameInput(input) => {
+                input.textarea.input(key_event);
+            }
             AppMode::NewCreature(form) => {
                 form.active_textarea_mut().input(key_event);
             }
             AppMode::Normal => {}
         }
+    }
+
+    pub fn submit_rename_input(&mut self) {
+        let AppMode::RenameInput(input) = &self.mode else {
+            return;
+        };
+
+        let after = textarea_value(&input.textarea).trim().to_string();
+        if after.is_empty() {
+            if let AppMode::RenameInput(input) = &mut self.mode {
+                input.error = Some("name is required".to_string());
+            }
+            return;
+        }
+
+        let Some(creature) = self.creatures.get(input.target_id) else {
+            self.mode = AppMode::Normal;
+            self.reconcile_selection_and_hover();
+            return;
+        };
+        let before = creature.name.clone();
+        let target_id = input.target_id;
+
+        if before != after {
+            self.history.edit(
+                &mut self.creatures,
+                CreatureEdit::RenameCreature {
+                    id: target_id,
+                    before,
+                    after,
+                },
+            );
+            self.hovered = self.creatures.index_of(target_id);
+            self.reconcile_selection_and_hover();
+        }
+        self.mode = AppMode::Normal;
     }
 
     pub fn open_new_creature_form(&mut self) {
@@ -547,6 +634,28 @@ mod tests {
         app.hovered = Some(1);
         app.toggle_hovered_selection();
         assert_eq!(app.target_ids(), vec![second]);
+    }
+
+    #[test]
+    fn rename_is_undoable_and_keeps_target_hovered_after_resort() {
+        let mut app = App::new();
+        let id = app.hovered_id().unwrap();
+
+        app.open_rename_input();
+        if let super::AppMode::RenameInput(input) = &mut app.mode {
+            input.textarea.select_all();
+            input.textarea.cut();
+            input.textarea.insert_str("zzzz");
+        }
+        app.submit_rename_input();
+
+        assert_eq!(app.creatures.get(id).unwrap().name, "zzzz");
+        assert_eq!(app.hovered_id(), Some(id));
+
+        app.undo();
+        assert_ne!(app.creatures.get(id).unwrap().name, "zzzz");
+        app.redo();
+        assert_eq!(app.creatures.get(id).unwrap().name, "zzzz");
     }
 
     #[test]

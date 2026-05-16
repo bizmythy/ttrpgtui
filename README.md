@@ -24,6 +24,7 @@ cargo run
 | `+` / `=` | Add health to the selected creatures, or hovered creature if none are selected |
 | `-` / `_` | Subtract health from the selected creatures, or hovered creature if none are selected |
 | `n` | Open the new-creature form |
+| `r` | Rename the hovered creature; disabled while any creature is selected |
 | `u` | Undo the last creature mutation |
 | `Ctrl+R` | Redo the last undone creature mutation |
 | `Esc` | Cancel an open form; quit from normal mode |
@@ -61,7 +62,7 @@ When `count` is greater than `1`, the app creates multiple creatures with letter
 
 ## Undo/redo
 
-Undo and redo track creature mutations, including health changes and new-creature creation. Navigation, selection toggles, and text typed into an unsubmitted form are not part of undo history.
+Undo and redo track creature mutations, including health changes, creature renames, and new-creature creation. Navigation, selection toggles, and text typed into an unsubmitted form are not part of undo history.
 
 ## License
 
