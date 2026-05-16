@@ -12,10 +12,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         "
       Press `Esc`, `Ctrl-C` or `q` to stop running.\n\
       Press `j` and `k` to increment and decrement the counter respectively.\n\
-      Counter: {}
-    ",
-        app.counter
-    );
+      Counter: N/A
+    ");
 
     let block = Block::default()
         .title("Counter App")

@@ -1,6 +1,9 @@
 /// Application.
 pub mod app;
 
+// Creature data.
+pub mod creature;
+
 /// Terminal events handler.
 pub mod event;
 
@@ -15,7 +18,7 @@ pub mod update;
 use app::App;
 use color_eyre::Result;
 use event::{Event, EventHandler};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use tui::Tui;
 use update::update;
 
