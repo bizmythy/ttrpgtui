@@ -1,12 +1,22 @@
 //! Creature data structures for the TTRPG TUI.
 
-use std::{cmp::Reverse, fmt};
+use std::{
+    cmp::Reverse,
+    fmt,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+static NEXT_CREATURE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Stable identifier for a creature.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CreatureId(u64);
 
 impl CreatureId {
+    pub fn new() -> Self {
+        Self(NEXT_CREATURE_ID.fetch_add(1, Ordering::Relaxed))
+    }
+
     pub fn get(self) -> u64 {
         self.0
     }
@@ -97,7 +107,7 @@ impl Creatures {
 
     fn add_with_id(&mut self, mut creature: Creature) -> CreatureId {
         if !creature.id.is_assigned() {
-            creature.id = self.next_available_id();
+            creature.id = CreatureId::new();
         }
 
         let id = creature.id;
@@ -175,17 +185,6 @@ impl Creatures {
                     right.id,
                 ))
         });
-    }
-
-    fn next_available_id(&self) -> CreatureId {
-        CreatureId(
-            self.sorted
-                .iter()
-                .map(|creature| creature.id.get())
-                .max()
-                .unwrap_or(0)
-                + 1,
-        )
     }
 }
 
