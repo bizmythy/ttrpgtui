@@ -4,7 +4,7 @@
 #[derive(Debug, Default)]
 pub struct Creature {
     pub name: String,
-    pub initiative: u8,
+    pub initiative: i16,
     pub ac: u8,
     health: i32,
     max_health: u16,
