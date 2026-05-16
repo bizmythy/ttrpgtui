@@ -1,75 +1,232 @@
-use std::{io, panic};
+#![allow(dead_code)]
 
-use color_eyre::Result;
-use ratatui::crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
-    execute,
-    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+use std::{
+    io::{Stdout, stdout},
+    ops::{Deref, DerefMut},
+    time::Duration,
 };
 
-pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
+use crossterm::{
+    cursor,
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event as CrosstermEvent, EventStream, KeyEvent, KeyEventKind, MouseEvent,
+    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
+};
+use futures::{FutureExt, StreamExt};
+use ratatui::backend::CrosstermBackend as Backend;
+use serde::{Deserialize, Serialize};
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
+    time::interval,
+};
+use tokio_util::sync::CancellationToken;
+use tracing::error;
 
-use crate::{app::App, event::EventHandler, ui};
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Event {
+    Init,
+    Quit,
+    Error,
+    Closed,
+    Tick,
+    Render,
+    FocusGained,
+    FocusLost,
+    Paste(String),
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Resize(u16, u16),
+}
 
-/// Representation of a terminal user interface.
-///
-/// It is responsible for setting up the terminal,
-/// initializing the interface and handling the draw events.
 pub struct Tui {
-    /// Interface to the Terminal.
-    terminal: CrosstermTerminal,
-    /// Terminal event handler.
-    pub events: EventHandler,
+    pub terminal: ratatui::Terminal<Backend<Stdout>>,
+    pub task: JoinHandle<()>,
+    pub cancellation_token: CancellationToken,
+    pub event_rx: UnboundedReceiver<Event>,
+    pub event_tx: UnboundedSender<Event>,
+    pub frame_rate: f64,
+    pub tick_rate: f64,
+    pub mouse: bool,
+    pub paste: bool,
 }
 
 impl Tui {
-    /// Constructs a new instance of [`Tui`].
-    pub fn new(terminal: CrosstermTerminal, events: EventHandler) -> Self {
-        Self { terminal, events }
+    pub fn new() -> color_eyre::Result<Self> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        Ok(Self {
+            terminal: ratatui::Terminal::new(Backend::new(stdout()))?,
+            task: tokio::spawn(async {}),
+            cancellation_token: CancellationToken::new(),
+            event_rx,
+            event_tx,
+            frame_rate: 60.0,
+            tick_rate: 4.0,
+            mouse: false,
+            paste: false,
+        })
     }
 
-    /// Initializes the terminal interface.
-    ///
-    /// It enables the raw mode and sets terminal properties.
-    pub fn enter(&mut self) -> Result<()> {
-        terminal::enable_raw_mode()?;
-        execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+    pub fn tick_rate(mut self, tick_rate: f64) -> Self {
+        self.tick_rate = tick_rate;
+        self
+    }
 
-        // Define a custom panic hook to reset the terminal properties.
-        // This way, you won't have your terminal messed up if an unexpected error happens.
-        let panic_hook = panic::take_hook();
-        panic::set_hook(Box::new(move |panic| {
-            Self::reset().expect("failed to reset the terminal");
-            panic_hook(panic);
-        }));
+    pub fn frame_rate(mut self, frame_rate: f64) -> Self {
+        self.frame_rate = frame_rate;
+        self
+    }
 
-        self.terminal.hide_cursor()?;
-        self.terminal.clear()?;
+    pub fn mouse(mut self, mouse: bool) -> Self {
+        self.mouse = mouse;
+        self
+    }
+
+    pub fn paste(mut self, paste: bool) -> Self {
+        self.paste = paste;
+        self
+    }
+
+    pub fn start(&mut self) {
+        self.cancel();
+        self.cancellation_token = CancellationToken::new();
+        let event_loop = Self::event_loop(
+            self.event_tx.clone(),
+            self.cancellation_token.clone(),
+            self.tick_rate,
+            self.frame_rate,
+        );
+        self.task = tokio::spawn(async {
+            event_loop.await;
+        });
+    }
+
+    async fn event_loop(
+        event_tx: UnboundedSender<Event>,
+        cancellation_token: CancellationToken,
+        tick_rate: f64,
+        frame_rate: f64,
+    ) {
+        let mut event_stream = EventStream::new();
+        let mut tick_interval = interval(Duration::from_secs_f64(1.0 / tick_rate));
+        let mut render_interval = interval(Duration::from_secs_f64(1.0 / frame_rate));
+
+        event_tx
+            .send(Event::Init)
+            .expect("failed to send init event");
+        loop {
+            let event = tokio::select! {
+                _ = cancellation_token.cancelled() => {
+                    break;
+                }
+                _ = tick_interval.tick() => Event::Tick,
+                _ = render_interval.tick() => Event::Render,
+                crossterm_event = event_stream.next().fuse() => match crossterm_event {
+                    Some(Ok(event)) => match event {
+                        CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => Event::Key(key),
+                        CrosstermEvent::Mouse(mouse) => Event::Mouse(mouse),
+                        CrosstermEvent::Resize(x, y) => Event::Resize(x, y),
+                        CrosstermEvent::FocusLost => Event::FocusLost,
+                        CrosstermEvent::FocusGained => Event::FocusGained,
+                        CrosstermEvent::Paste(s) => Event::Paste(s),
+                        _ => continue,
+                    }
+                    Some(Err(_)) => Event::Error,
+                    None => break,
+                },
+            };
+            if event_tx.send(event).is_err() {
+                break;
+            }
+        }
+        cancellation_token.cancel();
+    }
+
+    pub fn stop(&self) -> color_eyre::Result<()> {
+        self.cancel();
+        let mut counter = 0;
+        while !self.task.is_finished() {
+            std::thread::sleep(Duration::from_millis(1));
+            counter += 1;
+            if counter > 50 {
+                self.task.abort();
+            }
+            if counter > 100 {
+                error!("Failed to abort task in 100 milliseconds for unknown reason");
+                break;
+            }
+        }
         Ok(())
     }
 
-    /// Draws the terminal interface by rendering the widgets.
-    pub fn draw(&mut self, app: &mut App) -> Result<()> {
-        self.terminal.draw(|frame| ui::render(app, frame))?;
+    pub fn enter(&mut self) -> color_eyre::Result<()> {
+        crossterm::terminal::enable_raw_mode()?;
+        crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
+        if self.mouse {
+            crossterm::execute!(stdout(), EnableMouseCapture)?;
+        }
+        if self.paste {
+            crossterm::execute!(stdout(), EnableBracketedPaste)?;
+        }
+        self.start();
         Ok(())
     }
 
-    /// Resets the terminal interface.
-    ///
-    /// This function is also used for the panic hook to revert
-    /// the terminal properties if unexpected errors occur.
-    fn reset() -> Result<()> {
-        terminal::disable_raw_mode()?;
-        execute!(io::stderr(), LeaveAlternateScreen, DisableMouseCapture)?;
+    pub fn exit(&mut self) -> color_eyre::Result<()> {
+        self.stop()?;
+        if crossterm::terminal::is_raw_mode_enabled()? {
+            self.flush()?;
+            if self.paste {
+                crossterm::execute!(stdout(), DisableBracketedPaste)?;
+            }
+            if self.mouse {
+                crossterm::execute!(stdout(), DisableMouseCapture)?;
+            }
+            crossterm::execute!(stdout(), LeaveAlternateScreen, cursor::Show)?;
+            crossterm::terminal::disable_raw_mode()?;
+        }
         Ok(())
     }
 
-    /// Exits the terminal interface.
-    ///
-    /// It disables the raw mode and reverts back the terminal properties.
-    pub fn exit(&mut self) -> Result<()> {
-        Self::reset()?;
-        self.terminal.show_cursor()?;
+    pub fn cancel(&self) {
+        self.cancellation_token.cancel();
+    }
+
+    pub fn suspend(&mut self) -> color_eyre::Result<()> {
+        self.exit()?;
+        #[cfg(not(windows))]
+        signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP)?;
         Ok(())
+    }
+
+    pub fn resume(&mut self) -> color_eyre::Result<()> {
+        self.enter()?;
+        Ok(())
+    }
+
+    pub async fn next_event(&mut self) -> Option<Event> {
+        self.event_rx.recv().await
+    }
+}
+
+impl Deref for Tui {
+    type Target = ratatui::Terminal<Backend<Stdout>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.terminal
+    }
+}
+
+impl DerefMut for Tui {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.terminal
+    }
+}
+
+impl Drop for Tui {
+    fn drop(&mut self) {
+        self.exit().unwrap();
     }
 }

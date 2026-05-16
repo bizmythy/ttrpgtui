@@ -1,0 +1,28 @@
+{
+  "keybindings": {
+    "Home": {
+      "<q>": "Quit",
+      "<Ctrl-c>": "Quit",
+      "<Ctrl-d>": "Quit",
+      "<Ctrl-z>": "Suspend",
+      "<Esc>": "ClearSelection",
+      "<j>": "MoveNext",
+      "<Down>": "MoveNext",
+      "<k>": "MovePrevious",
+      "<Up>": "MovePrevious",
+      "<g>": "MoveFirst",
+      "<Shift-g>": "MoveLast",
+      "<Space>": "ToggleSelection",
+      "<=>": "OpenAddHealth",
+      "<+>": "OpenAddHealth",
+      "<Shift-+>": "OpenAddHealth",
+      "<->": "OpenSubtractHealth",
+      "<Shift-_>": "OpenSubtractHealth",
+      "<i>": "OpenInitiativeInput",
+      "<n>": "OpenNewCreatureForm",
+      "<u>": "Undo",
+      "<Ctrl-r>": "Redo",
+      "<r>": "OpenRenameInput"
+    }
+  }
+}
