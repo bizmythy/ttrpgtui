@@ -6,6 +6,42 @@ pub struct Creature {
     pub name: String,
     pub initiative: u8,
     pub ac: u8,
+    health: i32,
+    max_health: u16,
+}
+
+impl Creature {
+    pub fn new(name: String, initiative: u8, ac: u8, max_health: u16) -> Self {
+        Self {
+            name,
+            initiative,
+            ac,
+            health: (max_health as i32),
+            max_health,
+        }
+    }
+}
+
+/// Health operations
+impl Creature {
+    pub fn get_health(&self) -> i32 {
+        self.health
+    }
+
+    pub fn get_max_health(&self) -> i32 {
+        self.max_health as i32
+    }
+
+    pub fn modify_health(&mut self, delta: i32) -> i32 {
+        self.health += delta;
+
+        let max = self.get_max_health();
+        if self.health > max {
+            self.health = max;
+        }
+
+        self.health
+    }
 }
 
 #[derive(Debug, Default)]
