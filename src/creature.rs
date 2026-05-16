@@ -76,21 +76,9 @@ mod tests {
     #[test]
     fn iter_returns_creatures_in_descending_initiative_order_without_consuming() {
         let mut creatures = Creatures::default();
-        creatures.add(Creature {
-            name: "slow".into(),
-            initiative: 3,
-            ac: 12,
-        });
-        creatures.add(Creature {
-            name: "fast".into(),
-            initiative: 18,
-            ac: 15,
-        });
-        creatures.add(Creature {
-            name: "middle".into(),
-            initiative: 10,
-            ac: 13,
-        });
+        creatures.add(Creature::new("slow".into(), 3, 12, 7));
+        creatures.add(Creature::new("fast".into(), 18, 15, 12));
+        creatures.add(Creature::new("middle".into(), 10, 13, 9));
 
         let names: Vec<&str> = creatures
             .iter()
