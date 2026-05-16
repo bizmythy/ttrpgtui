@@ -31,7 +31,6 @@ pub struct Creature {
     pub ac: Option<i32>,
     health: i32,
     max_health: i32,
-    order: u64,
 }
 
 impl Creature {
@@ -48,12 +47,7 @@ impl Creature {
             ac,
             health: max_health,
             max_health,
-            order: 0,
         }
-    }
-
-    pub fn order(&self) -> u64 {
-        self.order
     }
 }
 
@@ -90,8 +84,6 @@ impl Creature {
 #[derive(Debug, Default)]
 pub struct Creatures {
     sorted: Vec<Creature>,
-    next_id: u64,
-    next_order: u64,
 }
 
 impl Creatures {
@@ -105,17 +97,7 @@ impl Creatures {
 
     fn add_with_id(&mut self, mut creature: Creature) -> CreatureId {
         if !creature.id.is_assigned() {
-            self.next_id += 1;
-            creature.id = CreatureId(self.next_id);
-        } else {
-            self.next_id = self.next_id.max(creature.id.get());
-        }
-
-        if creature.order == 0 {
-            self.next_order += 1;
-            creature.order = self.next_order;
-        } else {
-            self.next_order = self.next_order.max(creature.order);
+            creature.id = self.next_available_id();
         }
 
         let id = creature.id;
@@ -134,7 +116,7 @@ impl Creatures {
                 true
             }
         });
-        removed.sort_by_key(|creature| creature.order);
+        removed.sort_by_key(|creature| creature.id);
         removed
     }
 
@@ -179,13 +161,31 @@ impl Creatures {
     }
 
     pub fn sort(&mut self) {
-        self.sorted.sort_by_key(|creature| {
+        self.sorted.sort_by(|left, right| {
             (
-                creature.initiative.is_none(),
-                Reverse(creature.initiative.unwrap_or(i32::MIN)),
-                creature.order,
+                left.initiative.is_none(),
+                Reverse(left.initiative.unwrap_or(i32::MIN)),
+                left.name.to_lowercase(),
+                left.id,
             )
+                .cmp(&(
+                    right.initiative.is_none(),
+                    Reverse(right.initiative.unwrap_or(i32::MIN)),
+                    right.name.to_lowercase(),
+                    right.id,
+                ))
         });
+    }
+
+    fn next_available_id(&self) -> CreatureId {
+        CreatureId(
+            self.sorted
+                .iter()
+                .map(|creature| creature.id.get())
+                .max()
+                .unwrap_or(0)
+                + 1,
+        )
     }
 }
 
@@ -200,7 +200,7 @@ impl<'a> IntoIterator for &'a Creatures {
 
 #[cfg(test)]
 mod tests {
-    use super::{Creature, Creatures};
+    use super::{Creature, CreatureId, Creatures};
 
     #[test]
     fn iter_returns_creatures_in_descending_initiative_order_without_consuming() {
@@ -237,17 +237,32 @@ mod tests {
     }
 
     #[test]
-    fn same_initiative_creatures_keep_insertion_order() {
+    fn same_initiative_creatures_sort_by_name_then_id() {
         let mut creatures = Creatures::default();
-        creatures.add(Creature::new("first", Some(10), None, 7));
-        creatures.add(Creature::new("second", Some(10), None, 7));
-        creatures.add(Creature::new("third", Some(10), None, 7));
+        let first_alpha = creatures.add(Creature::new("alpha", Some(10), None, 7));
+        creatures.add(Creature::new("charlie", Some(10), None, 7));
+        creatures.add(Creature::new("bravo", Some(10), None, 7));
+        let second_alpha = creatures.add(Creature::new("alpha", Some(10), None, 7));
 
-        let names: Vec<&str> = creatures
+        let rows: Vec<(&str, CreatureId)> = creatures
             .iter()
-            .map(|creature| creature.name.as_str())
+            .map(|creature| (creature.name.as_str(), creature.id))
             .collect();
-        assert_eq!(names, vec!["first", "second", "third"]);
+        assert_eq!(
+            rows,
+            vec![
+                ("alpha", first_alpha),
+                ("alpha", second_alpha),
+                (
+                    "bravo",
+                    creatures.iter().find(|c| c.name == "bravo").unwrap().id
+                ),
+                (
+                    "charlie",
+                    creatures.iter().find(|c| c.name == "charlie").unwrap().id
+                ),
+            ]
+        );
     }
 
     #[test]
