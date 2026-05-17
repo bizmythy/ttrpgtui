@@ -16,6 +16,7 @@ pub enum Action {
     ClearScreen,
     Error(String),
     Help,
+    OpenSessionPicker,
     LoadEncounter {
         session_dir: String,
         encounter_file: String,

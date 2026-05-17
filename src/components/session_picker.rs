@@ -1,12 +1,13 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Margin, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use ratatui_textarea::TextArea;
+use tui_tree_widget::{Tree, TreeItem, TreeState};
 
 use super::Component;
 use crate::{
@@ -15,11 +16,7 @@ use crate::{
     storage::{self, EncounterInfo, SessionInfo},
 };
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum PickerStep {
-    Session,
-    Encounter,
-}
+type TreeIdentifier = String;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PickerInput {
@@ -27,19 +24,24 @@ enum PickerInput {
     EncounterName,
 }
 
-/// Startup picker for selecting or creating session/encounter files.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct SessionNode {
+    session: SessionInfo,
+    encounters: Vec<EncounterInfo>,
+}
+
+/// Unified session/encounter tree for opening file-backed encounters.
 pub struct SessionPicker {
     data_dir: std::path::PathBuf,
     active: bool,
-    step: PickerStep,
+    can_close: bool,
     input: Option<PickerInput>,
-    sessions: Vec<SessionInfo>,
-    encounters: Vec<EncounterInfo>,
-    selected_session: Option<SessionInfo>,
-    session_state: ListState,
-    encounter_state: ListState,
+    nodes: Vec<SessionNode>,
+    tree_state: TreeState<TreeIdentifier>,
     textarea: TextArea<'static>,
     message: Option<String>,
+    current_session_dir: Option<String>,
+    current_encounter_file: Option<String>,
 }
 
 impl SessionPicker {
@@ -47,47 +49,103 @@ impl SessionPicker {
         Self {
             data_dir: std::path::PathBuf::new(),
             active: true,
-            step: PickerStep::Session,
+            can_close: false,
             input: None,
-            sessions: Vec::new(),
-            encounters: Vec::new(),
-            selected_session: None,
-            session_state: ListState::default(),
-            encounter_state: ListState::default(),
+            nodes: Vec::new(),
+            tree_state: TreeState::default(),
             textarea: TextArea::default(),
             message: None,
+            current_session_dir: None,
+            current_encounter_file: None,
         }
     }
 
-    fn refresh_sessions(&mut self) -> color_eyre::Result<()> {
-        self.sessions = storage::list_sessions(&self.data_dir)?;
-        clamp_selection(&mut self.session_state, self.sessions.len());
+    fn activate(&mut self) -> color_eyre::Result<()> {
+        self.active = true;
+        self.input = None;
+        self.message = None;
+        self.refresh_tree()?;
+        self.select_current_or_first();
         Ok(())
     }
 
-    fn refresh_encounters(&mut self) -> color_eyre::Result<()> {
-        self.encounters = self
-            .selected_session
-            .as_ref()
-            .map(storage::list_encounters)
-            .transpose()?
-            .unwrap_or_default();
-        clamp_selection(&mut self.encounter_state, self.encounters.len());
+    fn refresh_tree(&mut self) -> color_eyre::Result<()> {
+        let sessions = storage::list_sessions(&self.data_dir)?;
+        self.nodes = sessions
+            .into_iter()
+            .map(|session| {
+                let encounters = storage::list_encounters(&session)?;
+                Ok(SessionNode {
+                    session,
+                    encounters,
+                })
+            })
+            .collect::<color_eyre::Result<Vec<_>>>()?;
+
+        for node in &self.nodes {
+            self.tree_state.open(vec![session_id(&node.session)]);
+        }
         Ok(())
     }
 
-    fn selected_session(&self) -> Option<SessionInfo> {
-        self.session_state
-            .selected()
-            .and_then(|index| self.sessions.get(index))
-            .cloned()
+    fn select_current_or_first(&mut self) {
+        if let (Some(session_dir), Some(encounter_file)) = (
+            self.current_session_dir.as_deref(),
+            self.current_encounter_file.as_deref(),
+        ) {
+            if self.find_encounter(session_dir, encounter_file).is_some() {
+                self.tree_state.select(vec![
+                    format_session_id(session_dir),
+                    format_encounter_id(encounter_file),
+                ]);
+                self.tree_state.open(vec![format_session_id(session_dir)]);
+                return;
+            }
+        }
+
+        if let Some(first) = self.nodes.first() {
+            self.tree_state.select(vec![session_id(&first.session)]);
+        } else {
+            self.tree_state.select(Vec::new());
+        }
     }
 
-    fn selected_encounter(&self) -> Option<EncounterInfo> {
-        self.encounter_state
-            .selected()
-            .and_then(|index| self.encounters.get(index))
-            .cloned()
+    fn selected_session(&self) -> Option<&SessionInfo> {
+        let selected = self.tree_state.selected();
+        selected
+            .first()
+            .and_then(|id| parse_session_id(id))
+            .and_then(|dir| self.find_session(dir))
+    }
+
+    fn selected_encounter(&self) -> Option<(&SessionInfo, &EncounterInfo)> {
+        let selected = self.tree_state.selected();
+        let session_dir = selected.first().and_then(|id| parse_session_id(id))?;
+        let encounter_file = selected.get(1).and_then(|id| parse_encounter_id(id))?;
+        self.find_encounter(session_dir, encounter_file)
+    }
+
+    fn find_session(&self, session_dir: &str) -> Option<&SessionInfo> {
+        self.nodes
+            .iter()
+            .find(|node| node.session.dir_name == session_dir)
+            .map(|node| &node.session)
+    }
+
+    fn find_encounter(
+        &self,
+        session_dir: &str,
+        encounter_file: &str,
+    ) -> Option<(&SessionInfo, &EncounterInfo)> {
+        let node = self
+            .nodes
+            .iter()
+            .find(|node| node.session.dir_name == session_dir)?;
+        let encounter = node
+            .encounters
+            .iter()
+            .find(|encounter| encounter.file_name == encounter_file)?;
+        Some((&node.session, encounter))
     }
 
     fn open_input(&mut self, input: PickerInput) {
@@ -110,33 +168,21 @@ impl SessionPicker {
         match input {
             PickerInput::SessionName => {
                 let session = storage::create_session(&self.data_dir, name)?;
-                self.refresh_sessions()?;
-                if let Some(index) = self
-                    .sessions
-                    .iter()
-                    .position(|candidate| candidate.dir_name == session.dir_name)
-                {
-                    self.session_state.select(Some(index));
-                }
-                self.selected_session = Some(session);
-                self.refresh_encounters()?;
-                self.step = PickerStep::Encounter;
+                self.refresh_tree()?;
+                self.tree_state.select(vec![session_id(&session)]);
+                self.tree_state.open(vec![session_id(&session)]);
             }
             PickerInput::EncounterName => {
-                let Some(session) = self.selected_session.clone() else {
+                let Some(session) = self.selected_session().cloned() else {
                     color_eyre::eyre::bail!("select a session before creating an encounter");
                 };
                 let encounter = storage::create_encounter(&session, name)?;
-                self.refresh_encounters()?;
-                if let Some(index) = self
-                    .encounters
-                    .iter()
-                    .position(|candidate| candidate.file_name == encounter.file_name)
-                {
-                    self.encounter_state.select(Some(index));
-                }
+                self.refresh_tree()?;
+                self.tree_state
+                    .select(vec![session_id(&session), encounter_id(&encounter)]);
+                self.tree_state.open(vec![session_id(&session)]);
                 self.input = None;
-                return self.load_encounter(encounter);
+                return self.load_encounter(session, encounter);
             }
         }
 
@@ -144,31 +190,30 @@ impl SessionPicker {
         Ok(Some(Action::Render))
     }
 
-    fn select_session(&mut self) -> color_eyre::Result<Option<Action>> {
-        let Some(session) = self.selected_session() else {
-            self.open_input(PickerInput::SessionName);
-            return Ok(Some(Action::Render));
-        };
-        self.selected_session = Some(session);
-        self.refresh_encounters()?;
-        self.step = PickerStep::Encounter;
+    fn open_selected(&mut self) -> color_eyre::Result<Option<Action>> {
+        if let Some((session, encounter)) = self.selected_encounter() {
+            return self.load_encounter(session.clone(), encounter.clone());
+        }
+
+        let selected = self.tree_state.selected().to_vec();
+        if selected.is_empty() && !self.nodes.is_empty() {
+            self.tree_state.key_down();
+        } else {
+            self.tree_state.toggle_selected();
+        }
         Ok(Some(Action::Render))
     }
 
-    fn select_encounter(&mut self) -> color_eyre::Result<Option<Action>> {
-        let Some(encounter) = self.selected_encounter() else {
-            self.open_input(PickerInput::EncounterName);
-            return Ok(Some(Action::Render));
-        };
-        self.load_encounter(encounter)
-    }
-
-    fn load_encounter(&mut self, encounter: EncounterInfo) -> color_eyre::Result<Option<Action>> {
-        let Some(session) = self.selected_session.clone() else {
-            color_eyre::eyre::bail!("select a session before opening an encounter");
-        };
+    fn load_encounter(
+        &mut self,
+        session: SessionInfo,
+        encounter: EncounterInfo,
+    ) -> color_eyre::Result<Option<Action>> {
         let persisted = storage::load_encounter(&encounter)?;
         self.active = false;
+        self.can_close = true;
+        self.current_session_dir = Some(session.dir_name.clone());
+        self.current_encounter_file = Some(encounter.file_name.clone());
         Ok(Some(Action::LoadEncounter {
             session_dir: session.dir_name,
             encounter_file: encounter.file_name,
@@ -177,56 +222,30 @@ impl SessionPicker {
         }))
     }
 
-    fn move_next(&mut self) {
-        match self.step {
-            PickerStep::Session => {
-                select_next_wrapping(&mut self.session_state, self.sessions.len())
-            }
-            PickerStep::Encounter => {
-                select_next_wrapping(&mut self.encounter_state, self.encounters.len())
-            }
+    fn close_or_back_out(&mut self) {
+        if self.input.take().is_some() {
+            return;
         }
-    }
-
-    fn move_previous(&mut self) {
-        match self.step {
-            PickerStep::Session => {
-                select_previous_wrapping(&mut self.session_state, self.sessions.len())
-            }
-            PickerStep::Encounter => {
-                select_previous_wrapping(&mut self.encounter_state, self.encounters.len())
-            }
-        }
-    }
-
-    fn go_back(&mut self) {
-        match self.input.take() {
-            Some(_) => {}
-            None if self.step == PickerStep::Encounter => {
-                self.step = PickerStep::Session;
-                self.selected_session = None;
-                self.encounters.clear();
-            }
-            None => {}
+        if self.can_close {
+            self.active = false;
         }
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         frame.render_widget(Clear, area);
-        let [title_area, body_area, footer_area] = Layout::vertical([
+        let [title_area, body_area, footer_area] = ratatui::layout::Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(2),
+            Constraint::Length(3),
         ])
         .areas(area);
 
-        let title = match self.step {
-            PickerStep::Session => "Choose a session",
-            PickerStep::Encounter => "Choose an encounter",
-        };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Sessions & encounters",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("  "),
                 Span::styled(
                     self.data_dir.display().to_string(),
@@ -237,24 +256,8 @@ impl SessionPicker {
             title_area,
         );
 
-        match self.step {
-            PickerStep::Session => self.render_sessions(frame, body_area),
-            PickerStep::Encounter => self.render_encounters(frame, body_area),
-        }
-
-        let help = match self.step {
-            PickerStep::Session => "j/k or ↑/↓ move • Enter open • n new session • q quit",
-            PickerStep::Encounter => {
-                "j/k or ↑/↓ move • Enter open • n new encounter • Esc back • q quit"
-            }
-        };
-        let footer = self.message.clone().unwrap_or_else(|| help.to_string());
-        let style = if self.message.is_some() {
-            Style::default().fg(Color::Red)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        frame.render_widget(Paragraph::new(footer).style(style), footer_area);
+        self.render_tree(frame, body_area.inner(Margin::new(1, 0)));
+        self.render_footer(frame, footer_area);
 
         if self.input.is_some() {
             let popup = area.centered(Constraint::Min(48), Constraint::Length(3));
@@ -263,60 +266,76 @@ impl SessionPicker {
         }
     }
 
-    fn render_sessions(&mut self, frame: &mut Frame, area: Rect) {
-        let items = if self.sessions.is_empty() {
-            vec![ListItem::new("No sessions yet — press n to create one")]
-        } else {
-            self.sessions
-                .iter()
-                .map(|session| {
-                    ListItem::new(Line::from(vec![
-                        Span::styled(&session.date, Style::default().fg(Color::Cyan)),
-                        Span::raw("  "),
-                        Span::raw(&session.name),
-                    ]))
-                })
-                .collect()
-        };
-        let list = List::new(items)
-            .block(Block::bordered().title("Sessions"))
+    fn render_tree(&mut self, frame: &mut Frame, area: Rect) {
+        if self.nodes.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No sessions yet. Press s to create one.")
+                    .block(Block::bordered().title("Library"))
+                    .style(Style::default().fg(Color::DarkGray)),
+                area,
+            );
+            return;
+        }
+
+        let items = self.tree_items();
+        let tree = Tree::new(&items)
+            .expect("session tree identifiers should be unique")
+            .block(Block::bordered().title("Library"))
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .highlight_symbol("› ");
-        frame.render_stateful_widget(list, area.inner(Margin::new(1, 0)), &mut self.session_state);
+            .highlight_symbol("› ")
+            .node_closed_symbol("▸ ")
+            .node_open_symbol("▾ ")
+            .node_no_children_symbol("  ");
+        frame.render_stateful_widget(tree, area, &mut self.tree_state);
     }
 
-    fn render_encounters(&mut self, frame: &mut Frame, area: Rect) {
-        let [session_area, list_area] =
-            Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(area);
-        let session_name = self
-            .selected_session
-            .as_ref()
-            .map(|session| format!("{} — {}", session.date, session.name))
-            .unwrap_or_else(|| "No session selected".to_string());
-        frame.render_widget(
-            Paragraph::new(session_name)
-                .style(Style::default().fg(Color::Cyan))
-                .wrap(Wrap { trim: true }),
-            session_area.inner(Margin::new(1, 0)),
-        );
-
-        let items = if self.encounters.is_empty() {
-            vec![ListItem::new("No encounters yet — press n to create one")]
+    fn render_footer(&self, frame: &mut Frame, area: Rect) {
+        let help = if self.can_close {
+            "↑/↓ or j/k move • ←/→ collapse/expand • click selects/opens • Enter open • n new encounter • s new session • Esc close • q quit"
         } else {
-            self.encounters
-                .iter()
-                .map(|encounter| ListItem::new(encounter.name.clone()))
-                .collect()
+            "↑/↓ or j/k move • ←/→ collapse/expand • click selects/opens • Enter open • n new encounter • s new session • q quit"
         };
-        let list = List::new(items)
-            .block(Block::bordered().title("Encounters"))
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .highlight_symbol("› ");
-        frame.render_stateful_widget(
-            list,
-            list_area.inner(Margin::new(1, 0)),
-            &mut self.encounter_state,
+        let text = self.message.clone().unwrap_or_else(|| help.to_string());
+        let style = if self.message.is_some() {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        frame.render_widget(
+            Paragraph::new(text).style(style).wrap(Wrap { trim: true }),
+            area,
         );
+    }
+
+    fn tree_items(&self) -> Vec<TreeItem<'static, TreeIdentifier>> {
+        self.nodes
+            .iter()
+            .map(|node| {
+                let children = node
+                    .encounters
+                    .iter()
+                    .map(|encounter| {
+                        let style = if self.current_session_dir.as_deref()
+                            == Some(node.session.dir_name.as_str())
+                            && self.current_encounter_file.as_deref()
+                                == Some(encounter.file_name.as_str())
+                        {
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        TreeItem::new_leaf(
+                            encounter_id(encounter),
+                            Line::from(vec![Span::styled(encounter.name.clone(), style)]),
+                        )
+                    })
+                    .collect();
+                TreeItem::new(session_id(&node.session), session_line(node), children)
+                    .expect("encounter identifiers should be unique per session")
+            })
+            .collect()
     }
 }
 
@@ -329,8 +348,26 @@ impl Default for SessionPicker {
 impl Component for SessionPicker {
     fn register_config_handler(&mut self, config: Config) -> color_eyre::Result<()> {
         self.data_dir = config.config.data_dir;
-        self.refresh_sessions()?;
+        self.activate()?;
         Ok(())
+    }
+
+    fn update(&mut self, action: Action) -> color_eyre::Result<Option<Action>> {
+        match action {
+            Action::OpenSessionPicker => self.activate()?,
+            Action::LoadEncounter {
+                session_dir,
+                encounter_file,
+                ..
+            } => {
+                self.current_session_dir = Some(session_dir);
+                self.current_encounter_file = Some(encounter_file);
+                self.can_close = true;
+                self.active = false;
+            }
+            _ => {}
+        }
+        Ok(None)
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<Option<Action>> {
@@ -339,6 +376,11 @@ impl Component for SessionPicker {
         }
 
         if self.input.is_some() {
+            if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                self.input = None;
+                return Ok(Some(Action::Render));
+            }
+
             match key.code {
                 KeyCode::Esc => self.input = None,
                 KeyCode::Enter => {
@@ -354,24 +396,66 @@ impl Component for SessionPicker {
             return Ok(Some(Action::Render));
         }
 
+        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.close_or_back_out();
+            return Ok(Some(Action::Render));
+        }
+
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.move_next(),
-            KeyCode::Char('k') | KeyCode::Up => self.move_previous(),
-            KeyCode::Char('n') => self.open_input(match self.step {
-                PickerStep::Session => PickerInput::SessionName,
-                PickerStep::Encounter => PickerInput::EncounterName,
-            }),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.tree_state.key_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.tree_state.key_up();
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.tree_state.key_right();
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.tree_state.key_left();
+            }
+            KeyCode::Char(' ') => {
+                self.tree_state.toggle_selected();
+            }
             KeyCode::Enter => {
-                return match self.step {
-                    PickerStep::Session => self.select_session(),
-                    PickerStep::Encounter => self.select_encounter(),
-                }
-                .or_else(|error| {
+                return self.open_selected().or_else(|error| {
                     self.message = Some(error.to_string());
                     Ok(Some(Action::Error(error.to_string())))
                 });
             }
-            KeyCode::Esc => self.go_back(),
+            KeyCode::Char('n') => self.open_input(PickerInput::EncounterName),
+            KeyCode::Char('s') => self.open_input(PickerInput::SessionName),
+            KeyCode::Esc => self.close_or_back_out(),
+            _ => return Ok(None),
+        }
+
+        Ok(Some(Action::Render))
+    }
+
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) -> color_eyre::Result<Option<Action>> {
+        if !self.active || self.input.is_some() {
+            return Ok(None);
+        }
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.tree_state
+                    .click_at(Position::new(mouse.column, mouse.row));
+                if let Some((session, encounter)) = self.selected_encounter() {
+                    return self
+                        .load_encounter(session.clone(), encounter.clone())
+                        .or_else(|error| {
+                            self.message = Some(error.to_string());
+                            Ok(Some(Action::Error(error.to_string())))
+                        });
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                self.tree_state.scroll_down(3);
+            }
+            MouseEventKind::ScrollUp => {
+                self.tree_state.scroll_up(3);
+            }
             _ => return Ok(None),
         }
 
@@ -386,33 +470,41 @@ impl Component for SessionPicker {
     }
 }
 
-fn clamp_selection(state: &mut ListState, len: usize) {
-    if len == 0 {
-        state.select(None);
-        return;
-    }
-    let selected = state.selected().unwrap_or(0).min(len - 1);
-    state.select(Some(selected));
+fn session_line(node: &SessionNode) -> Line<'static> {
+    let encounter_count = node.encounters.len();
+    Line::from(vec![
+        Span::styled(node.session.date.clone(), Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled(
+            node.session.name.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!("  ({encounter_count})")),
+    ])
 }
 
-fn select_next_wrapping(state: &mut ListState, len: usize) {
-    if len == 0 {
-        state.select(None);
-        return;
-    }
-    let next = state.selected().map_or(0, |index| (index + 1) % len);
-    state.select(Some(next));
+fn session_id(session: &SessionInfo) -> TreeIdentifier {
+    format_session_id(&session.dir_name)
 }
 
-fn select_previous_wrapping(state: &mut ListState, len: usize) {
-    if len == 0 {
-        state.select(None);
-        return;
-    }
-    let previous = state
-        .selected()
-        .map_or(0, |index| if index == 0 { len - 1 } else { index - 1 });
-    state.select(Some(previous));
+fn encounter_id(encounter: &EncounterInfo) -> TreeIdentifier {
+    format_encounter_id(&encounter.file_name)
+}
+
+fn format_session_id(dir_name: &str) -> TreeIdentifier {
+    format!("session:{dir_name}")
+}
+
+fn format_encounter_id(file_name: &str) -> TreeIdentifier {
+    format!("encounter:{file_name}")
+}
+
+fn parse_session_id(id: &str) -> Option<&str> {
+    id.strip_prefix("session:")
+}
+
+fn parse_encounter_id(id: &str) -> Option<&str> {
+    id.strip_prefix("encounter:")
 }
 
 fn input_block(title: &'static str) -> Block<'static> {

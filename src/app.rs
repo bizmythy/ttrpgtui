@@ -64,7 +64,8 @@ impl App {
     pub async fn run(&mut self) -> color_eyre::Result<()> {
         let mut tui = Tui::new()?
             .tick_rate(self.tick_rate)
-            .frame_rate(self.frame_rate);
+            .frame_rate(self.frame_rate)
+            .mouse(true);
         tui.enter()?;
 
         for component in self.components.iter_mut() {
@@ -127,10 +128,11 @@ impl App {
     fn handle_component_event(&mut self, event: Event) -> color_eyre::Result<bool> {
         let action_tx = self.action_tx.clone();
         let mut handled = false;
-        for component in self.components.iter_mut() {
+        for component in self.components.iter_mut().rev() {
             if let Some(action) = component.handle_events(Some(event.clone()))? {
                 action_tx.send(action)?;
                 handled = true;
+                break;
             }
         }
         Ok(handled)

@@ -5,6 +5,7 @@
       "<Ctrl-c>": "Quit",
       "<Ctrl-d>": "Quit",
       "<Ctrl-z>": "Suspend",
+      "<Ctrl-o>": "OpenSessionPicker",
       "<Esc>": "ClearSelection",
       "<j>": "MoveNext",
       "<Down>": "MoveNext",

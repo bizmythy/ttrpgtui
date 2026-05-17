@@ -475,6 +475,10 @@ impl Component for Encounter {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<Option<Action>> {
+        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(Some(Action::OpenSessionPicker));
+        }
+
         let action = match self.mode {
             AppMode::Normal => None,
             AppMode::HealthInput(_) => match key.code {
