@@ -9,6 +9,7 @@ use crate::{action::Action, config::Config, tui::Event};
 
 pub mod encounter;
 pub mod fps;
+pub mod session_picker;
 
 /// A visual/interactive unit registered with the main application loop.
 pub trait Component {

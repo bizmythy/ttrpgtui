@@ -1,13 +1,18 @@
 use crossterm::event::KeyEvent;
-use ratatui::prelude::Rect;
+use ratatui::{
+    prelude::Rect,
+    style::{Color, Style},
+    widgets::Paragraph,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
 use crate::{
     action::Action,
-    components::{Component, encounter::Encounter, fps::FpsCounter},
+    components::{Component, encounter::Encounter, fps::FpsCounter, session_picker::SessionPicker},
     config::Config,
+    storage,
     tui::{Event, Tui},
 };
 
@@ -22,6 +27,7 @@ pub struct App {
     last_tick_key_events: Vec<KeyEvent>,
     action_tx: mpsc::UnboundedSender<Action>,
     action_rx: mpsc::UnboundedReceiver<Action>,
+    status_error: Option<String>,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -33,17 +39,25 @@ pub enum Mode {
 impl App {
     pub fn new(tick_rate: f64, frame_rate: f64) -> color_eyre::Result<Self> {
         let (action_tx, action_rx) = mpsc::unbounded_channel();
+        let (save_tx, save_rx) = mpsc::unbounded_channel();
+        let config = Config::new()?;
+        storage::spawn_writer(config.config.data_dir.clone(), save_rx, action_tx.clone());
         Ok(Self {
             tick_rate,
             frame_rate,
-            components: vec![Box::new(Encounter::new()), Box::new(FpsCounter::default())],
+            components: vec![
+                Box::new(Encounter::with_save_handler(Some(save_tx))),
+                Box::new(FpsCounter::default()),
+                Box::new(SessionPicker::new()),
+            ],
             should_quit: false,
             should_suspend: false,
-            config: Config::new()?,
+            config,
             mode: Mode::Home,
             last_tick_key_events: Vec::new(),
             action_tx,
             action_rx,
+            status_error: None,
         })
     }
 
@@ -157,6 +171,7 @@ impl App {
                 Action::Suspend => self.should_suspend = true,
                 Action::Resume => self.should_suspend = false,
                 Action::ClearScreen => tui.terminal.clear()?,
+                Action::Error(ref message) => self.status_error = Some(message.clone()),
                 Action::Resize(w, h) => self.handle_resize(tui, w, h)?,
                 Action::Render => self.render(tui)?,
                 _ => {}
@@ -184,6 +199,14 @@ impl App {
                         .action_tx
                         .send(Action::Error(format!("Failed to draw: {err:?}")));
                 }
+            }
+            if let Some(message) = &self.status_error {
+                let area = frame.area();
+                let status_area = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+                frame.render_widget(
+                    Paragraph::new(message.clone()).style(Style::default().fg(Color::Red)),
+                    status_area,
+                );
             }
         })?;
         Ok(())

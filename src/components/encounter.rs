@@ -8,7 +8,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use undo::Record;
 
 use super::Component;
@@ -22,6 +22,7 @@ use crate::{
             letter_suffix, parse_i32, parse_positive_i32, textarea_value,
         },
     },
+    storage::{SaveRequest, encounter_from_creatures},
 };
 
 const ROW_HEIGHT: u16 = 3;
@@ -35,33 +36,68 @@ pub struct Encounter {
     pub mode: AppMode,
     history: Record<CreatureEdit>,
     command_tx: Option<UnboundedSender<Action>>,
+    save_tx: Option<mpsc::UnboundedSender<SaveRequest>>,
+    session_dir: Option<String>,
+    encounter_file: Option<String>,
+    encounter_name: Option<String>,
 }
 
 impl Encounter {
     pub fn new() -> Self {
-        let mut encounter = Self {
+        Self::with_save_handler(None)
+    }
+
+    pub fn with_save_handler(save_tx: Option<mpsc::UnboundedSender<SaveRequest>>) -> Self {
+        Self {
             creatures: Creatures::default(),
-            hovered: Some(0),
+            hovered: None,
             scroll_offset: 0,
             selected: BTreeSet::new(),
             mode: AppMode::Normal,
             history: Record::new(),
             command_tx: None,
+            save_tx,
+            session_dir: None,
+            encounter_file: None,
+            encounter_name: None,
+        }
+    }
+
+    fn load_encounter(
+        &mut self,
+        session_dir: String,
+        encounter_file: String,
+        encounter_name: String,
+        creatures: Vec<Creature>,
+    ) {
+        self.creatures = Creatures::from_vec(creatures);
+        self.hovered = None;
+        self.scroll_offset = 0;
+        self.selected.clear();
+        self.mode = AppMode::Normal;
+        self.history = Record::new();
+        self.session_dir = Some(session_dir);
+        self.encounter_file = Some(encounter_file);
+        self.encounter_name = Some(encounter_name);
+        self.reconcile_selection_and_hover();
+    }
+
+    fn emit_save(&self) -> color_eyre::Result<()> {
+        let (Some(save_tx), Some(session_dir), Some(encounter_file), Some(encounter_name)) = (
+            &self.save_tx,
+            &self.session_dir,
+            &self.encounter_file,
+            &self.encounter_name,
+        ) else {
+            return Ok(());
         };
 
-        // Seed data until persistence/import is added.
-        encounter
-            .creatures
-            .add(Creature::new("john", Some(2), Some(12), 35));
-        encounter
-            .creatures
-            .add(Creature::new("jane", Some(1), Some(10), 25));
-        encounter
-            .creatures
-            .add(Creature::new("horace", Some(3), Some(15), 40));
-        encounter.reconcile_selection_and_hover();
-
-        encounter
+        save_tx.send(SaveRequest {
+            session_dir: session_dir.clone(),
+            encounter_file: encounter_file.clone(),
+            encounter: encounter_from_creatures(encounter_name.clone(), &self.creatures),
+        })?;
+        Ok(())
     }
 
     pub fn move_next(&mut self) {
@@ -468,7 +504,14 @@ impl Component for Encounter {
     }
 
     fn update(&mut self, action: Action) -> color_eyre::Result<Option<Action>> {
+        let before = action_changes_persisted_state(&action).then(|| self.creatures.to_vec());
         match action {
+            Action::LoadEncounter {
+                session_dir,
+                encounter_file,
+                encounter_name,
+                creatures,
+            } => self.load_encounter(session_dir, encounter_file, encounter_name, creatures),
             Action::ClearSelection => self.clear_selection(),
             Action::MoveNext => self.move_next(),
             Action::MovePrevious => self.move_previous(),
@@ -492,6 +535,10 @@ impl Component for Encounter {
             Action::TextInput(key) => self.route_textarea_key(key),
             _ => {}
         };
+
+        if before.is_some_and(|before| before != self.creatures.to_vec()) {
+            self.emit_save()?;
+        }
         Ok(None)
     }
 
@@ -499,6 +546,18 @@ impl Component for Encounter {
         self.render(frame, area);
         Ok(())
     }
+}
+
+fn action_changes_persisted_state(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::SubmitHealthInput
+            | Action::SubmitInitiativeInput
+            | Action::SubmitRenameInput
+            | Action::SubmitNewCreatureForm
+            | Action::Undo
+            | Action::Redo
+    )
 }
 
 fn numeric_textarea_key_allowed(key_event: KeyEvent) -> bool {
@@ -894,9 +953,39 @@ mod tests {
         encounter.update(action).unwrap();
     }
 
+    fn seeded_encounter() -> Encounter {
+        let mut encounter = Encounter::new();
+        encounter
+            .creatures
+            .add(crate::models::creature::Creature::new(
+                "john",
+                Some(2),
+                Some(12),
+                35,
+            ));
+        encounter
+            .creatures
+            .add(crate::models::creature::Creature::new(
+                "jane",
+                Some(1),
+                Some(10),
+                25,
+            ));
+        encounter
+            .creatures
+            .add(crate::models::creature::Creature::new(
+                "horace",
+                Some(3),
+                Some(15),
+                40,
+            ));
+        encounter.reconcile_selection_and_hover();
+        encounter
+    }
+
     #[test]
     fn target_ids_use_selection_when_present() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         let first = encounter.creatures.id_at(0).unwrap();
         let second = encounter.creatures.id_at(1).unwrap();
 
@@ -908,7 +997,7 @@ mod tests {
 
     #[test]
     fn rename_is_undoable_and_keeps_target_hovered_after_resort() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         let id = encounter.hovered_id().unwrap();
 
         encounter.open_rename_input();
@@ -930,7 +1019,7 @@ mod tests {
 
     #[test]
     fn undo_redo_restores_clamped_health_exactly() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         let id = encounter.creatures.id_at(0).unwrap();
         encounter.selected.clear();
         encounter.hovered = encounter.creatures.index_of(id);
@@ -958,7 +1047,7 @@ mod tests {
 
     #[test]
     fn numeric_input_ignores_letters_and_punctuation() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
 
         encounter.open_health_input(HealthOperation::Add);
         for character in ['1', 'a', '-', '.', '2'] {
@@ -974,7 +1063,7 @@ mod tests {
 
     #[test]
     fn new_creature_numeric_fields_filter_input_but_name_does_not() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
 
         encounter.open_new_creature_form();
         if let AppMode::NewCreature(form) = &mut encounter.mode {
@@ -998,8 +1087,39 @@ mod tests {
     }
 
     #[test]
+    fn changed_encounter_state_is_emitted_for_async_persistence() {
+        let (save_tx, mut save_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut encounter = Encounter::with_save_handler(Some(save_tx));
+        apply(
+            &mut encounter,
+            Action::LoadEncounter {
+                session_dir: "2026-05-16_test".to_string(),
+                encounter_file: "ambush.ron".to_string(),
+                encounter_name: "Ambush".to_string(),
+                creatures: Vec::new(),
+            },
+        );
+
+        encounter.open_new_creature_form();
+        if let AppMode::NewCreature(form) = &mut encounter.mode {
+            form.fields.name.insert_str("goblin");
+            form.active_field = NewCreatureField::Health;
+            form.fields.health.insert_str("7");
+        } else {
+            panic!("expected new creature mode");
+        }
+        apply(&mut encounter, Action::SubmitNewCreatureForm);
+
+        let save = save_rx.try_recv().expect("expected save request");
+        assert_eq!(save.session_dir, "2026-05-16_test");
+        assert_eq!(save.encounter_file, "ambush.ron");
+        assert_eq!(save.encounter.name, "Ambush");
+        assert_eq!(save.encounter.creatures[0].name, "goblin");
+    }
+
+    #[test]
     fn space_toggles_hovered_selection() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         let id = encounter.hovered_id().unwrap();
 
         apply(&mut encounter, Action::ToggleSelection);
@@ -1011,7 +1131,7 @@ mod tests {
 
     #[test]
     fn plus_opens_add_health_input_for_current_target() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         let id = encounter.hovered_id().unwrap();
 
         apply(&mut encounter, Action::OpenAddHealth);
@@ -1025,7 +1145,7 @@ mod tests {
 
     #[test]
     fn r_opens_rename_only_without_multiselect() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
 
         apply(&mut encounter, Action::OpenRenameInput);
         assert!(matches!(encounter.mode, AppMode::RenameInput(_)));
@@ -1038,7 +1158,7 @@ mod tests {
 
     #[test]
     fn escape_clears_selection_without_quitting() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         encounter.toggle_hovered_selection();
 
         apply(&mut encounter, Action::ClearSelection);
@@ -1048,7 +1168,7 @@ mod tests {
 
     #[test]
     fn movement_wraps_between_first_and_last_rows() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         encounter.move_last();
 
         apply(&mut encounter, Action::MoveNext);
@@ -1060,7 +1180,7 @@ mod tests {
 
     #[test]
     fn i_updates_initiative_and_keeps_target_hovered_after_resort() {
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         encounter.move_last();
         let id = encounter.hovered_id().unwrap();
 
@@ -1080,7 +1200,7 @@ mod tests {
     fn hovered_row_draws_border() {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
 
         terminal
             .draw(|frame| encounter.draw(frame, frame.area()).unwrap())
@@ -1095,7 +1215,7 @@ mod tests {
     fn down_creature_renders_red() {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         let id = encounter.hovered_id().unwrap();
         encounter.creatures.get_mut(id).unwrap().modify_health(-100);
 
@@ -1113,7 +1233,7 @@ mod tests {
     fn creature_names_render_bold() {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
 
         terminal
             .draw(|frame| encounter.draw(frame, frame.area()).unwrap())
@@ -1133,7 +1253,7 @@ mod tests {
     fn hovered_selected_row_uses_cyan_border() {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut encounter = Encounter::new();
+        let mut encounter = seeded_encounter();
         encounter.toggle_hovered_selection();
 
         terminal

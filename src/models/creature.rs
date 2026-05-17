@@ -6,10 +6,14 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use serde::{Deserialize, Serialize};
+
 static NEXT_CREATURE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Stable identifier for a creature.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct CreatureId(u64);
 
 impl CreatureId {
@@ -24,6 +28,22 @@ impl CreatureId {
     fn is_assigned(self) -> bool {
         self.0 != 0
     }
+
+    fn reserve_next_after(self) {
+        let next = self.0.saturating_add(1);
+        let mut current = NEXT_CREATURE_ID.load(Ordering::Relaxed);
+        while current < next {
+            match NEXT_CREATURE_ID.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
+    }
 }
 
 impl fmt::Display for CreatureId {
@@ -33,7 +53,7 @@ impl fmt::Display for CreatureId {
 }
 
 /// Individual Creature Data
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Creature {
     pub id: CreatureId,
     pub name: String,
@@ -95,7 +115,7 @@ impl Creature {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Creatures {
     sorted: Vec<Creature>,
 }
@@ -115,6 +135,7 @@ impl Creatures {
         }
 
         let id = creature.id;
+        id.reserve_next_after();
         self.sorted.push(creature);
         self.sort();
         id
@@ -160,6 +181,18 @@ impl Creatures {
 
     pub fn iter(&self) -> std::slice::Iter<'_, Creature> {
         self.sorted.iter()
+    }
+
+    pub fn to_vec(&self) -> Vec<Creature> {
+        self.sorted.clone()
+    }
+
+    pub fn from_vec(creatures: Vec<Creature>) -> Self {
+        let mut collection = Self::default();
+        for creature in creatures {
+            collection.add_existing(creature);
+        }
+        collection
     }
 
     pub fn len(&self) -> usize {

@@ -11,6 +11,7 @@ mod config;
 mod errors;
 mod logging;
 mod models;
+mod storage;
 mod tui;
 
 #[tokio::main]
