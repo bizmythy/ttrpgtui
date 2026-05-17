@@ -59,6 +59,8 @@ pub struct Creature {
     pub name: String,
     pub initiative: Option<i32>,
     pub ac: Option<i32>,
+    #[serde(default)]
+    pub description: String,
     health: i32,
     max_health: i32,
 }
@@ -75,6 +77,7 @@ impl Creature {
             name: name.into(),
             initiative,
             ac,
+            description: String::new(),
             health: max_health,
             max_health,
         }
@@ -97,6 +100,10 @@ impl Creature {
 
     pub fn set_initiative(&mut self, initiative: Option<i32>) {
         self.initiative = initiative;
+    }
+
+    pub fn set_description(&mut self, description: String) {
+        self.description = description;
     }
 
     pub fn modify_health(&mut self, delta: i32) -> i32 {

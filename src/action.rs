@@ -35,6 +35,7 @@ pub enum Action {
     OpenInitiativeInput,
     OpenNewCreatureForm,
     OpenRenameInput,
+    OpenDescriptionInput,
     Undo,
     Redo,
 
@@ -42,6 +43,7 @@ pub enum Action {
     SubmitHealthInput,
     SubmitInitiativeInput,
     SubmitRenameInput,
+    SubmitDescriptionInput,
     SubmitNewCreatureForm,
     FocusNextNewCreatureField,
     FocusPreviousNewCreatureField,

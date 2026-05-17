@@ -2,4 +2,3 @@
 
 pub mod creature;
 pub mod edit;
-pub mod input;

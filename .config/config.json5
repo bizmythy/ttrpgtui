@@ -23,7 +23,8 @@
       "<n>": "OpenNewCreatureForm",
       "<u>": "Undo",
       "<Ctrl-r>": "Redo",
-      "<r>": "OpenRenameInput"
+      "<r>": "OpenRenameInput",
+      "<d>": "OpenDescriptionInput"
     }
   }
 }

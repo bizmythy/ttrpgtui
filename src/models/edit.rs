@@ -29,12 +29,28 @@ impl InitiativeChange {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DescriptionChange {
+    id: CreatureId,
+    before: String,
+    after: String,
+}
+
+impl DescriptionChange {
+    pub fn new(id: CreatureId, before: String, after: String) -> Self {
+        Self { id, before, after }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreatureEdit {
     AdjustHealth {
         changes: Vec<HealthChange>,
     },
     SetInitiative {
         changes: Vec<InitiativeChange>,
+    },
+    SetDescription {
+        changes: Vec<DescriptionChange>,
     },
     RenameCreature {
         id: CreatureId,
@@ -68,6 +84,13 @@ impl Edit for CreatureEdit {
                 }
                 target.sort();
             }
+            Self::SetDescription { changes } => {
+                for change in changes {
+                    if let Some(creature) = target.get_mut(change.id) {
+                        creature.set_description(change.after.clone());
+                    }
+                }
+            }
             Self::RenameCreature { id, after, .. } => {
                 if let Some(creature) = target.get_mut(*id) {
                     creature.name.clone_from(after);
@@ -99,6 +122,13 @@ impl Edit for CreatureEdit {
                     }
                 }
                 target.sort();
+            }
+            Self::SetDescription { changes } => {
+                for change in changes {
+                    if let Some(creature) = target.get_mut(change.id) {
+                        creature.set_description(change.before.clone());
+                    }
+                }
             }
             Self::RenameCreature { id, before, .. } => {
                 if let Some(creature) = target.get_mut(*id) {

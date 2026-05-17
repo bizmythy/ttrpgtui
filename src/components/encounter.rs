@@ -11,18 +11,18 @@ use ratatui::{
 use tokio::sync::mpsc::{self, UnboundedSender};
 use undo::Record;
 
-use super::Component;
+use super::{Component, vim_textarea::VimTextArea};
 use crate::{
     action::Action,
     models::{
         creature::{Creature, CreatureId, Creatures},
-        edit::{CreatureEdit, HealthChange, InitiativeChange},
-        input::{
-            AppMode, HealthInput, HealthOperation, InitiativeInput, NewCreatureField, RenameInput,
-            letter_suffix, parse_i32, parse_positive_i32, textarea_value,
-        },
+        edit::{CreatureEdit, DescriptionChange, HealthChange, InitiativeChange},
     },
     storage::{SaveRequest, encounter_from_creatures},
+    ui::encounter_input::{
+        AppMode, HealthInput, HealthOperation, InitiativeInput, NewCreatureField, RenameInput,
+        letter_suffix, parse_i32, parse_positive_i32, textarea_value,
+    },
 };
 
 const ROW_HEIGHT: u16 = 3;
@@ -154,7 +154,11 @@ impl Encounter {
         if self.selected.is_empty() {
             self.hovered_id().into_iter().collect()
         } else {
-            self.selected.iter().copied().collect()
+            self.creatures
+                .ids_in_display_order()
+                .into_iter()
+                .filter(|id| self.selected.contains(id))
+                .collect()
         }
     }
 
@@ -192,6 +196,21 @@ impl Encounter {
         };
 
         self.mode = AppMode::RenameInput(Box::new(RenameInput::new(target_id, &creature.name)));
+    }
+
+    pub fn open_description_input(&mut self) {
+        let target_ids = self.target_ids();
+        let Some(first_target) = target_ids.first().copied() else {
+            return;
+        };
+        let Some(creature) = self.creatures.get(first_target) else {
+            return;
+        };
+
+        self.mode = AppMode::DescriptionInput(Box::new(VimTextArea::new(
+            target_ids,
+            &creature.description,
+        )));
     }
 
     pub fn cancel_input(&mut self) {
@@ -293,6 +312,9 @@ impl Encounter {
             AppMode::RenameInput(input) => {
                 input.textarea.input(key_event);
             }
+            AppMode::DescriptionInput(input) => {
+                input.input(key_event);
+            }
             AppMode::NewCreature(form) => {
                 if !matches!(form.active_field, NewCreatureField::Name)
                     && !numeric_textarea_key_allowed(key_event)
@@ -336,6 +358,34 @@ impl Encounter {
                 },
             );
             self.hovered = self.creatures.index_of(target_id);
+            self.reconcile_selection_and_hover();
+        }
+        self.mode = AppMode::Normal;
+    }
+
+    pub fn submit_description_input(&mut self) {
+        let AppMode::DescriptionInput(input) = &self.mode else {
+            return;
+        };
+
+        let after = input.value().trim().to_string();
+        let target_ids = input.target_ids.clone();
+        let mut changes = Vec::new();
+
+        for id in target_ids {
+            if let Some(creature) = self.creatures.get(id) {
+                let before = creature.description.clone();
+                if before != after {
+                    changes.push(DescriptionChange::new(id, before, after.clone()));
+                }
+            }
+        }
+
+        if !changes.is_empty() {
+            self.history.edit(
+                &mut self.creatures,
+                CreatureEdit::SetDescription { changes },
+            );
             self.reconcile_selection_and_hover();
         }
         self.mode = AppMode::Normal;
@@ -479,7 +529,7 @@ impl Component for Encounter {
             return Ok(Some(Action::OpenSessionPicker));
         }
 
-        let action = match self.mode {
+        let action = match &self.mode {
             AppMode::Normal => None,
             AppMode::HealthInput(_) => match key.code {
                 KeyCode::Esc => Some(Action::CancelInput),
@@ -494,6 +544,11 @@ impl Component for Encounter {
             AppMode::RenameInput(_) => match key.code {
                 KeyCode::Esc => Some(Action::CancelInput),
                 KeyCode::Enter => Some(Action::SubmitRenameInput),
+                _ => Some(Action::TextInput(key)),
+            },
+            AppMode::DescriptionInput(input) => match key.code {
+                KeyCode::Esc if input.is_normal_mode() => Some(Action::CancelInput),
+                KeyCode::Enter if input.is_normal_mode() => Some(Action::SubmitDescriptionInput),
                 _ => Some(Action::TextInput(key)),
             },
             AppMode::NewCreature(_) => match key.code {
@@ -527,12 +582,14 @@ impl Component for Encounter {
             Action::OpenInitiativeInput => self.open_initiative_input(),
             Action::OpenNewCreatureForm => self.open_new_creature_form(),
             Action::OpenRenameInput => self.open_rename_input(),
+            Action::OpenDescriptionInput => self.open_description_input(),
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
             Action::CancelInput => self.cancel_input(),
             Action::SubmitHealthInput => self.submit_health_input(),
             Action::SubmitInitiativeInput => self.submit_initiative_input(),
             Action::SubmitRenameInput => self.submit_rename_input(),
+            Action::SubmitDescriptionInput => self.submit_description_input(),
             Action::SubmitNewCreatureForm => self.submit_new_creature_form(),
             Action::FocusNextNewCreatureField => self.focus_next_new_creature_field(),
             Action::FocusPreviousNewCreatureField => self.focus_previous_new_creature_field(),
@@ -558,6 +615,7 @@ fn action_changes_persisted_state(action: &Action) -> bool {
         Action::SubmitHealthInput
             | Action::SubmitInitiativeInput
             | Action::SubmitRenameInput
+            | Action::SubmitDescriptionInput
             | Action::SubmitNewCreatureForm
             | Action::Undo
             | Action::Redo
@@ -588,10 +646,11 @@ fn render_header(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new("Init").style(style), columns[1]);
     frame.render_widget(Paragraph::new("AC").style(style), columns[2]);
     frame.render_widget(Paragraph::new("Health").style(style), columns[3]);
+    frame.render_widget(Paragraph::new("Description").style(style), columns[4]);
 }
 
 fn render_footer(frame: &mut Frame, area: Rect) {
-    let help = "j/k move • Space select • +/- health • i initiative • n new • r rename • u undo • Ctrl+R redo • q quit";
+    let help = "j/k move • Space select • +/- health • i initiative • n new • r rename • d description • u undo • Ctrl+R redo • q quit";
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
         area,
@@ -698,13 +757,26 @@ fn render_creature_row(
             text_style,
         )),
     );
+    render_cell(
+        frame,
+        columns[4],
+        Line::from(Span::styled(
+            if creature.description.is_empty() {
+                "—".to_string()
+            } else {
+                creature.description.clone()
+            },
+            text_style,
+        )),
+    );
 }
 
-fn row_columns(area: Rect) -> [Rect; 4] {
+fn row_columns(area: Rect) -> [Rect; 5] {
     Layout::horizontal([
-        Constraint::Percentage(30),
-        Constraint::Percentage(18),
+        Constraint::Percentage(24),
         Constraint::Percentage(12),
+        Constraint::Percentage(8),
+        Constraint::Percentage(16),
         Constraint::Fill(1),
     ])
     .areas(area)
@@ -802,6 +874,16 @@ fn render_popup(encounter: &mut Encounter, frame: &mut Frame, full_area: Rect, l
                 input.error.as_deref(),
             );
         }
+        AppMode::DescriptionInput(input) => {
+            let target_label = target_label(&encounter.creatures, &input.target_ids);
+            input.set_block(format!("Set description for {target_label}"));
+            let area = full_area.centered(
+                Constraint::Percentage(70),
+                Constraint::Length(full_area.height.min(7).max(3)),
+            );
+            frame.render_widget(Clear, area);
+            frame.render_widget(&input.textarea, area);
+        }
         AppMode::NewCreature(form) => {
             style_new_creature_form(form);
             let area = full_area.centered(Constraint::Min(50), Constraint::Length(19));
@@ -890,7 +972,7 @@ fn row_popup_area(
     Rect::new(x, y, width, height).clamp(full_area)
 }
 
-fn style_new_creature_form(form: &mut crate::models::input::NewCreatureForm) {
+fn style_new_creature_form(form: &mut crate::ui::encounter_input::NewCreatureForm) {
     set_field_block(
         &mut form.fields.name,
         "name",
@@ -950,7 +1032,7 @@ mod tests {
     use super::{Component, Encounter};
     use crate::{
         action::Action,
-        models::input::{AppMode, HealthOperation, NewCreatureField, textarea_value},
+        ui::encounter_input::{AppMode, HealthOperation, NewCreatureField, textarea_value},
     };
 
     fn apply(encounter: &mut Encounter, action: Action) {
@@ -1158,6 +1240,63 @@ mod tests {
         encounter.toggle_hovered_selection();
         apply(&mut encounter, Action::OpenRenameInput);
         assert!(matches!(encounter.mode, AppMode::Normal));
+    }
+
+    #[test]
+    fn description_input_prefills_first_selected_row_and_applies_to_all_targets() {
+        let mut encounter = seeded_encounter();
+        let first = encounter.creatures.id_at(0).unwrap();
+        let second = encounter.creatures.id_at(1).unwrap();
+        encounter.creatures.get_mut(first).unwrap().description = "first".to_string();
+        encounter.creatures.get_mut(second).unwrap().description = "second".to_string();
+        encounter.selected.insert(second);
+        encounter.selected.insert(first);
+
+        apply(&mut encounter, Action::OpenDescriptionInput);
+        let AppMode::DescriptionInput(input) = &mut encounter.mode else {
+            panic!("expected description input mode");
+        };
+        assert_eq!(input.value(), "first");
+        input.textarea.select_all();
+        input.textarea.cut();
+        input.textarea.insert_str("shared");
+
+        apply(&mut encounter, Action::SubmitDescriptionInput);
+
+        assert_eq!(
+            encounter.creatures.get(first).unwrap().description,
+            "shared"
+        );
+        assert_eq!(
+            encounter.creatures.get(second).unwrap().description,
+            "shared"
+        );
+    }
+
+    #[test]
+    fn description_edit_uses_vim_insert_flow_and_is_undoable() {
+        let mut encounter = seeded_encounter();
+        let id = encounter.hovered_id().unwrap();
+
+        apply(&mut encounter, Action::OpenDescriptionInput);
+        for key in [
+            KeyEvent::new(KeyCode::Char('S'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        ] {
+            apply(&mut encounter, Action::TextInput(key));
+        }
+        apply(&mut encounter, Action::SubmitDescriptionInput);
+
+        assert_eq!(encounter.creatures.get(id).unwrap().description, "scout");
+        encounter.undo();
+        assert_eq!(encounter.creatures.get(id).unwrap().description, "");
+        encounter.redo();
+        assert_eq!(encounter.creatures.get(id).unwrap().description, "scout");
     }
 
     #[test]

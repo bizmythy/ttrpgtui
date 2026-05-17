@@ -2,13 +2,14 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 use ratatui_textarea::TextArea;
 
-use super::creature::CreatureId;
+use crate::{components::vim_textarea::VimTextArea, models::creature::CreatureId};
 
 pub enum AppMode {
     Normal,
     HealthInput(Box<HealthInput>),
     InitiativeInput(Box<InitiativeInput>),
     RenameInput(Box<RenameInput>),
+    DescriptionInput(Box<VimTextArea>),
     NewCreature(Box<NewCreatureForm>),
 }
 
