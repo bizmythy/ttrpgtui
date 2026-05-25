@@ -20,6 +20,8 @@ Each data directory has a campaign-specific `campaign.ron` file. Creatures liste
 
 You can also reference a D&D Beyond character ID. When a new encounter is created, the app fetches that character and uses D&D Beyond's reported name, max HP, AC if present in the API response, and character summary. The app does not manually calculate AC.
 
+D&D Beyond only allows this for character sheets your request can access. Public/campaign-visible sheets should work anonymously; private sheets require authentication. To authenticate, set `DND_BEYOND_AUTHORIZATION` to the full `Authorization` header value, `DND_BEYOND_BEARER_TOKEN` to just the token, or `DND_BEYOND_COOKIE` to a valid D&D Beyond `Cookie` header value before launching the app.
+
 Example:
 
 ```ron
