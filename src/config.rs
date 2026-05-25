@@ -44,9 +44,11 @@ lazy_static! {
 }
 
 impl Config {
-    pub fn new() -> color_eyre::Result<Self, config::ConfigError> {
+    pub fn new(
+        data_dir_override: Option<PathBuf>,
+    ) -> color_eyre::Result<Self, config::ConfigError> {
         let default_config: Config = json5::from_str(CONFIG).unwrap();
-        let data_dir = get_data_dir();
+        let data_dir = data_dir_override.clone().unwrap_or_else(get_data_dir);
         let config_dir = get_config_dir();
         let mut builder = config::Config::builder()
             .set_default("data_dir", data_dir.to_str().unwrap())?
@@ -71,6 +73,9 @@ impl Config {
         }
         if !found_config {
             error!("No configuration file found; falling back to bundled defaults");
+        }
+        if let Some(data_dir) = data_dir_override {
+            builder = builder.set_override("data_dir", data_dir.to_str().unwrap())?;
         }
 
         let mut cfg: Self = builder.build()?.try_deserialize()?;
@@ -97,10 +102,8 @@ impl Config {
 pub fn get_data_dir() -> PathBuf {
     if let Some(s) = DATA_FOLDER.clone() {
         s
-    } else if let Some(proj_dirs) = project_directory() {
-        proj_dirs.data_local_dir().to_path_buf()
     } else {
-        PathBuf::from(".").join(".data")
+        env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     }
 }
 
@@ -465,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_config() -> color_eyre::Result<()> {
-        let c = Config::new()?;
+        let c = Config::new(None)?;
         assert_eq!(
             c.keybindings
                 .0

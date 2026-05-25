@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 use crate::config::{get_config_dir, get_data_dir};
@@ -12,6 +14,10 @@ pub struct Cli {
     /// Frame rate, i.e. number of frames per second
     #[arg(short, long, value_name = "FLOAT", default_value_t = 60.0)]
     pub frame_rate: f64,
+
+    /// Directory where session and encounter data files are stored
+    #[arg(short = 'd', long = "dir", value_name = "DIR")]
+    pub data_dir: Option<PathBuf>,
 }
 
 const VERSION_MESSAGE: &str = concat!(

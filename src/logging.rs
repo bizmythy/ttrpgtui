@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -8,8 +10,10 @@ lazy_static::lazy_static! {
     pub static ref LOG_FILE: String = format!("{}.log", env!("CARGO_PKG_NAME"));
 }
 
-pub fn init() -> color_eyre::Result<()> {
-    let directory = config::get_data_dir();
+pub fn init(data_dir: Option<&Path>) -> color_eyre::Result<()> {
+    let directory = data_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(config::get_data_dir);
     std::fs::create_dir_all(directory.clone())?;
     let log_path = directory.join(LOG_FILE.clone());
     let log_file = std::fs::File::create(log_path)?;

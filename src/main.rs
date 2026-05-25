@@ -18,10 +18,11 @@ mod ui;
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     crate::errors::init()?;
-    crate::logging::init()?;
 
     let args = Cli::parse();
-    let mut app = App::new(args.tick_rate, args.frame_rate)?;
+    crate::logging::init(args.data_dir.as_deref())?;
+
+    let mut app = App::new(args.tick_rate, args.frame_rate, args.data_dir)?;
     app.run().await?;
     Ok(())
 }

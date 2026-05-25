@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crossterm::event::KeyEvent;
 use ratatui::{
     prelude::Rect,
@@ -37,10 +39,14 @@ pub enum Mode {
 }
 
 impl App {
-    pub fn new(tick_rate: f64, frame_rate: f64) -> color_eyre::Result<Self> {
+    pub fn new(
+        tick_rate: f64,
+        frame_rate: f64,
+        data_dir: Option<PathBuf>,
+    ) -> color_eyre::Result<Self> {
         let (action_tx, action_rx) = mpsc::unbounded_channel();
         let (save_tx, save_rx) = mpsc::unbounded_channel();
-        let config = Config::new()?;
+        let config = Config::new(data_dir)?;
         storage::spawn_writer(config.config.data_dir.clone(), save_rx, action_tx.clone());
         Ok(Self {
             tick_rate,
