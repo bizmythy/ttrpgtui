@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossterm::{
-    cursor,
+    cursor::{self, SetCursorStyle},
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
         Event as CrosstermEvent, EventStream, KeyEvent, KeyEventKind, MouseEvent,
@@ -184,7 +184,12 @@ impl Tui {
             if self.mouse {
                 crossterm::execute!(stdout(), DisableMouseCapture)?;
             }
-            crossterm::execute!(stdout(), LeaveAlternateScreen, cursor::Show)?;
+            crossterm::execute!(
+                stdout(),
+                SetCursorStyle::DefaultUserShape,
+                LeaveAlternateScreen,
+                cursor::Show
+            )?;
             crossterm::terminal::disable_raw_mode()?;
         }
         Ok(())

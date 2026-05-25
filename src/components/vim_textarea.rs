@@ -1,8 +1,11 @@
-use std::fmt;
+use std::{fmt, io::stdout};
 
-use crossterm::event::KeyEvent;
+use crossterm::{cursor::SetCursorStyle, event::KeyEvent};
 use ratatui::{
+    Frame,
+    layout::{Alignment, Margin, Position, Rect},
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, Borders},
 };
 use ratatui_textarea::{CursorMove, Input, Key, Scrolling, TextArea};
@@ -19,7 +22,7 @@ pub struct VimTextArea {
 
 impl VimTextArea {
     pub fn new(target_ids: Vec<CreatureId>, initial_text: &str) -> Self {
-        let mode = Mode::Normal;
+        let mode = Mode::Insert;
         let mut textarea = TextArea::default();
         textarea.insert_str(initial_text);
         textarea.set_placeholder_text("Description");
@@ -56,6 +59,30 @@ impl VimTextArea {
     pub fn set_block(&mut self, title: String) {
         self.textarea.set_block(self.vim.mode.block(title));
     }
+
+    pub fn draw(&self, frame: &mut Frame, area: Rect) {
+        frame.render_widget(&self.textarea, area);
+        if self.vim.mode == Mode::Insert {
+            let _ = crossterm::execute!(stdout(), SetCursorStyle::SteadyBar);
+            let cursor = self.textarea.screen_cursor();
+            let inner = area.inner(Margin {
+                horizontal: 1,
+                vertical: 1,
+            });
+            if !inner.is_empty() {
+                frame.set_cursor_position(Position {
+                    x: inner
+                        .x
+                        .saturating_add(cursor.col as u16)
+                        .min(inner.right().saturating_sub(1)),
+                    y: inner
+                        .y
+                        .saturating_add(cursor.row as u16)
+                        .min(inner.bottom().saturating_sub(1)),
+                });
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,27 +96,29 @@ enum Mode {
 
 impl Mode {
     fn block<'a>(&self, title: String) -> Block<'a> {
-        let help = match self {
-            Self::Normal => "i insert • Enter apply • Esc cancel",
-            Self::Replace(_) | Self::Insert => "Esc normal mode",
-            Self::Visual => "y yank • d delete • Esc normal mode",
-            Self::Operator(_) => "move cursor to apply operator",
-        };
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::LightBlue))
-            .title(format!("{title} — {self} MODE ({help})"))
+            .title(title)
+            .title(Line::from(self.to_string()).alignment(Alignment::Right))
     }
 
     fn cursor_style(&self) -> Style {
-        let color = match self {
-            Self::Normal => Color::Reset,
-            Self::Insert => Color::LightBlue,
-            Self::Replace(_) => Color::LightRed,
-            Self::Visual => Color::LightYellow,
-            Self::Operator(_) => Color::LightGreen,
-        };
-        Style::default().fg(color).add_modifier(Modifier::REVERSED)
+        match self {
+            Self::Insert => Style::default(),
+            Self::Normal => Style::default()
+                .fg(Color::Reset)
+                .add_modifier(Modifier::REVERSED),
+            Self::Replace(_) => Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::REVERSED),
+            Self::Visual => Style::default()
+                .fg(Color::LightYellow)
+                .add_modifier(Modifier::REVERSED),
+            Self::Operator(_) => Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::REVERSED),
+        }
     }
 }
 

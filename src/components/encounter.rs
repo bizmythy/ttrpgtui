@@ -882,7 +882,7 @@ fn render_popup(encounter: &mut Encounter, frame: &mut Frame, full_area: Rect, l
                 Constraint::Length(full_area.height.min(7).max(3)),
             );
             frame.render_widget(Clear, area);
-            frame.render_widget(&input.textarea, area);
+            input.draw(frame, area);
         }
         AppMode::NewCreature(form) => {
             style_new_creature_form(form);
@@ -1280,7 +1280,6 @@ mod tests {
 
         apply(&mut encounter, Action::OpenDescriptionInput);
         for key in [
-            KeyEvent::new(KeyCode::Char('S'), KeyModifiers::NONE),
             KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
             KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
