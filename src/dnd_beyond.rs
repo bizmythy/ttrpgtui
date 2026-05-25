@@ -134,6 +134,7 @@ struct CharacterData {
     base_hit_points: i32,
     bonus_hit_points: Option<i32>,
     override_hit_points: Option<i32>,
+    removed_hit_points: i32,
     #[serde(default)]
     armor_class: Option<i32>,
     #[serde(default)]
@@ -147,8 +148,10 @@ impl CharacterData {
         let max_health = self
             .override_hit_points
             .unwrap_or_else(|| self.base_hit_points + self.bonus_hit_points.unwrap_or_default());
+        let current_health = max_health - self.removed_hit_points;
         let description = self.description();
         let mut creature = Creature::new(self.name, None, self.armor_class, max_health);
+        creature.set_health(current_health);
         creature.set_description(description);
         creature
     }
@@ -206,6 +209,7 @@ mod tests {
             "baseHitPoints": 42,
             "bonusHitPoints": 3,
             "overrideHitPoints": null,
+            "removedHitPoints": 7,
             "race": { "fullName": "Human" },
             "classes": [{ "level": 6, "definition": { "name": "Fighter" } }]
         }))
@@ -213,6 +217,7 @@ mod tests {
 
         let creature = data.into_creature();
         assert_eq!(creature.name, "Example Hero");
+        assert_eq!(creature.get_health(), 38);
         assert_eq!(creature.get_max_health(), 45);
         assert_eq!(creature.ac, None);
         assert_eq!(creature.description, "Human Fighter 6");
@@ -225,6 +230,7 @@ mod tests {
             "baseHitPoints": 42,
             "bonusHitPoints": null,
             "overrideHitPoints": 50,
+            "removedHitPoints": 0,
             "armorClass": 17
         }))
         .unwrap();
