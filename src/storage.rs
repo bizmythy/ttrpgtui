@@ -11,6 +11,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::{
     action::Action,
+    dnd_beyond::{self, CharacterId},
     models::creature::{Creature, Creatures},
 };
 
@@ -47,13 +48,25 @@ pub struct CampaignConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CampaignCreature {
+#[serde(untagged)]
+pub enum CampaignCreature {
+    Preset(CampaignCreaturePreset),
+    DndBeyond(DndBeyondCharacterPreset),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CampaignCreaturePreset {
     pub name: String,
     pub health: i32,
     #[serde(default)]
     pub ac: Option<i32>,
     #[serde(default)]
     pub description: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DndBeyondCharacterPreset {
+    pub dnd_beyond_character_id: u64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -265,15 +278,24 @@ pub fn encounter_from_creatures(name: String, creatures: &Creatures) -> Persiste
 }
 
 fn campaign_creatures(data_dir: &Path) -> color_eyre::Result<Vec<Creature>> {
-    Ok(load_campaign_config(data_dir)?
+    load_campaign_config(data_dir)?
         .creatures
         .into_iter()
-        .map(Creature::from)
-        .collect())
+        .map(campaign_creature)
+        .collect()
 }
 
-impl From<CampaignCreature> for Creature {
-    fn from(preset: CampaignCreature) -> Self {
+fn campaign_creature(preset: CampaignCreature) -> color_eyre::Result<Creature> {
+    match preset {
+        CampaignCreature::Preset(preset) => Ok(Creature::from(preset)),
+        CampaignCreature::DndBeyond(preset) => {
+            dnd_beyond::fetch_character(CharacterId(preset.dnd_beyond_character_id))
+        }
+    }
+}
+
+impl From<CampaignCreaturePreset> for Creature {
+    fn from(preset: CampaignCreaturePreset) -> Self {
         let mut creature = Creature::new(preset.name, None, preset.ac, preset.health);
         creature.set_description(preset.description);
         creature
@@ -436,12 +458,12 @@ mod tests {
         write_ron_atomic(
             &campaign_config_path(temp_dir.path()),
             &CampaignConfig {
-                creatures: vec![CampaignCreature {
+                creatures: vec![CampaignCreature::Preset(CampaignCreaturePreset {
                     name: "Mira".to_string(),
                     health: 24,
                     ac: Some(16),
                     description: "party cleric".to_string(),
-                }],
+                })],
             },
         )
         .unwrap();

@@ -16,7 +16,9 @@ Encounter/session data is stored in the directory where the app is launched. Use
 
 ## Campaign creature presets
 
-Each data directory has a campaign-specific `campaign.ron` file. Creatures listed there are automatically added to every newly-created encounter. Presets include name, health, AC, and description; initiative is intentionally not configurable because it should be rolled per encounter.
+Each data directory has a campaign-specific `campaign.ron` file. Creatures listed there are automatically added to every newly-created encounter. Manual presets include name, health, AC, and description; initiative is intentionally not configurable because it should be rolled per encounter.
+
+You can also reference a D&D Beyond character ID. When a new encounter is created, the app fetches that character and uses D&D Beyond's reported name, max HP, AC if present in the API response, and character summary. The app does not manually calculate AC.
 
 Example:
 
@@ -28,6 +30,9 @@ Example:
             health: 24,
             ac: Some(16),
             description: "party cleric",
+        ),
+        (
+            dnd_beyond_character_id: 48690485,
         ),
     ],
 )

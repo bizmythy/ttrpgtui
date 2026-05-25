@@ -8,6 +8,7 @@ mod app;
 mod cli;
 mod components;
 mod config;
+mod dnd_beyond;
 mod errors;
 mod logging;
 mod models;
