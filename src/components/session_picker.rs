@@ -176,7 +176,7 @@ impl SessionPicker {
                 let Some(session) = self.selected_session().cloned() else {
                     color_eyre::eyre::bail!("select a session before creating an encounter");
                 };
-                let encounter = storage::create_encounter(&session, name)?;
+                let encounter = storage::create_encounter(&self.data_dir, &session, name)?;
                 self.refresh_tree()?;
                 self.tree_state
                     .select(vec![session_id(&session), encounter_id(&encounter)]);

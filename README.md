@@ -12,6 +12,27 @@ Run the app with:
 cargo run
 ```
 
+Encounter/session data is stored in the directory where the app is launched. Use `--dir DIR` or `-d DIR` to store it somewhere else.
+
+## Campaign creature presets
+
+Each data directory has a campaign-specific `campaign.ron` file. Creatures listed there are automatically added to every newly-created encounter. Presets include name, health, AC, and description; initiative is intentionally not configurable because it should be rolled per encounter.
+
+Example:
+
+```ron
+(
+    creatures: [
+        (
+            name: "Mira",
+            health: 24,
+            ac: Some(16),
+            description: "party cleric",
+        ),
+    ],
+)
+```
+
 ## Keybindings
 
 | Key | Action |

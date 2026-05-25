@@ -16,6 +16,7 @@ use crate::{
 
 const SESSIONS_DIR: &str = "sessions";
 const SESSION_MANIFEST: &str = "session.ron";
+const CAMPAIGN_CONFIG: &str = "campaign.ron";
 const ENCOUNTER_EXTENSION: &str = "ron";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -37,6 +38,22 @@ pub struct EncounterInfo {
     pub file_name: String,
     pub path: PathBuf,
     pub name: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CampaignConfig {
+    #[serde(default)]
+    pub creatures: Vec<CampaignCreature>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CampaignCreature {
+    pub name: String,
+    pub health: i32,
+    #[serde(default)]
+    pub ac: Option<i32>,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -81,7 +98,25 @@ pub fn sessions_root(data_dir: &Path) -> PathBuf {
     data_dir.join(SESSIONS_DIR)
 }
 
+pub fn campaign_config_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(CAMPAIGN_CONFIG)
+}
+
+pub fn ensure_campaign_config(data_dir: &Path) -> color_eyre::Result<()> {
+    let path = campaign_config_path(data_dir);
+    if !path.exists() {
+        write_ron_atomic(&path, &CampaignConfig::default())?;
+    }
+    Ok(())
+}
+
+pub fn load_campaign_config(data_dir: &Path) -> color_eyre::Result<CampaignConfig> {
+    ensure_campaign_config(data_dir)?;
+    read_ron(&campaign_config_path(data_dir))
+}
+
 pub fn list_sessions(data_dir: &Path) -> color_eyre::Result<Vec<SessionInfo>> {
+    ensure_campaign_config(data_dir)?;
     let root = sessions_root(data_dir);
     fs::create_dir_all(&root)?;
 
@@ -188,7 +223,11 @@ pub fn list_encounters(session: &SessionInfo) -> color_eyre::Result<Vec<Encounte
     Ok(encounters)
 }
 
-pub fn create_encounter(session: &SessionInfo, name: &str) -> color_eyre::Result<EncounterInfo> {
+pub fn create_encounter(
+    data_dir: &Path,
+    session: &SessionInfo,
+    name: &str,
+) -> color_eyre::Result<EncounterInfo> {
     let name = validate_name(name, "encounter name")?;
     fs::create_dir_all(&session.path)?;
     let base_file_stem = slugify(name);
@@ -196,7 +235,7 @@ pub fn create_encounter(session: &SessionInfo, name: &str) -> color_eyre::Result
     let path = session.path.join(&file_name);
     let encounter = PersistedEncounter {
         name: name.to_string(),
-        creatures: Vec::new(),
+        creatures: campaign_creatures(data_dir)?,
     };
     write_ron_atomic(&path, &encounter)?;
 
@@ -222,6 +261,22 @@ pub fn encounter_from_creatures(name: String, creatures: &Creatures) -> Persiste
     PersistedEncounter {
         name,
         creatures: creatures.to_vec(),
+    }
+}
+
+fn campaign_creatures(data_dir: &Path) -> color_eyre::Result<Vec<Creature>> {
+    Ok(load_campaign_config(data_dir)?
+        .creatures
+        .into_iter()
+        .map(Creature::from)
+        .collect())
+}
+
+impl From<CampaignCreature> for Creature {
+    fn from(preset: CampaignCreature) -> Self {
+        let mut creature = Creature::new(preset.name, None, preset.ac, preset.health);
+        creature.set_description(preset.description);
+        creature
     }
 }
 
@@ -348,7 +403,9 @@ mod tests {
     fn session_and_encounter_round_trip_through_ron_files() {
         let temp_dir = tempfile::tempdir().unwrap();
         let session = create_session(temp_dir.path(), "Friday Night").unwrap();
-        let encounter = create_encounter(&session, "Goblin Ambush").unwrap();
+        let encounter = create_encounter(temp_dir.path(), &session, "Goblin Ambush").unwrap();
+
+        assert!(campaign_config_path(temp_dir.path()).exists());
 
         let sessions = list_sessions(temp_dir.path()).unwrap();
         assert_eq!(sessions[0].name, "Friday Night");
@@ -371,5 +428,35 @@ mod tests {
         let reloaded = load_encounter(&encounters[0]).unwrap();
         assert_eq!(reloaded.name, "Goblin Ambush");
         assert_eq!(reloaded.creatures[0].name, "goblin");
+    }
+
+    #[test]
+    fn new_encounters_are_seeded_from_campaign_config_without_initiative() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        write_ron_atomic(
+            &campaign_config_path(temp_dir.path()),
+            &CampaignConfig {
+                creatures: vec![CampaignCreature {
+                    name: "Mira".to_string(),
+                    health: 24,
+                    ac: Some(16),
+                    description: "party cleric".to_string(),
+                }],
+            },
+        )
+        .unwrap();
+
+        let session = create_session(temp_dir.path(), "Friday Night").unwrap();
+        let encounter = create_encounter(temp_dir.path(), &session, "Goblin Ambush").unwrap();
+        let persisted = load_encounter(&encounter).unwrap();
+
+        assert_eq!(persisted.creatures.len(), 1);
+        let creature = &persisted.creatures[0];
+        assert_eq!(creature.name, "Mira");
+        assert_eq!(creature.get_health(), 24);
+        assert_eq!(creature.get_max_health(), 24);
+        assert_eq!(creature.ac, Some(16));
+        assert_eq!(creature.initiative, None);
+        assert_eq!(creature.description, "party cleric");
     }
 }
