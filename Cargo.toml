@@ -17,7 +17,7 @@ config = "0.14.0"
 # Kept at 0.29 to match ratatui-textarea/ratatui's crossterm event types.
 crossterm = {version = "0.29.0", features = ["serde", "event-stream"]}
 chrono = {version = "0.4.38", default-features = false, features = ["clock", "serde"]}
-directories = "5.0.1"
+directories = "6.0.0"
 futures = "0.3.31"
 human-panic = "2.0.2"
 json5 = "0.4.1"
